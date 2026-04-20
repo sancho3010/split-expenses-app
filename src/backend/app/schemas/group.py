@@ -1,5 +1,7 @@
 """Schemas de grupos y miembros."""
 
+# pylint: disable=too-few-public-methods
+
 from datetime import datetime
 from uuid import UUID
 

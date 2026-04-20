@@ -15,6 +15,7 @@ from ..schemas import (
     SettlementResponse,
 )
 from ..services import balance_service, expense_service
+from ..services.expense_service import CreateExpenseInput
 
 router = APIRouter(prefix="/api/groups/{group_id}", tags=["expenses"])
 
@@ -28,12 +29,14 @@ def create_expense(
     """Registra un gasto en el grupo."""
     try:
         expense = expense_service.create_expense(
-            db=db,
-            group_id=group_id,
-            paid_by_id=payload.paid_by_id,
-            description=payload.description,
-            amount=payload.amount,
-            split_among_ids=payload.split_among_ids,
+            db,
+            CreateExpenseInput(
+                group_id=group_id,
+                paid_by_id=payload.paid_by_id,
+                description=payload.description,
+                amount=payload.amount,
+                split_among_ids=payload.split_among_ids,
+            ),
         )
     except ValueError as exc:
         raise bad_request(str(exc)) from exc

@@ -1,5 +1,7 @@
 """Schemas de gastos."""
 
+# pylint: disable=too-few-public-methods
+
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID

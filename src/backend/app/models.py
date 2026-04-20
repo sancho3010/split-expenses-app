@@ -1,5 +1,7 @@
 """Modelos ORM de la aplicación."""
 
+# pylint: disable=too-few-public-methods
+
 import uuid
 from datetime import datetime, timezone
 
