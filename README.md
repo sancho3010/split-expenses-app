@@ -137,7 +137,12 @@ test-staging (aceptación + E2E + seguridad)
 deploy-prod (mismo orden)
      ↓
 smoke-test-prod
+     ↓
+rollback-prod (si smoke tests fallan)
+  → automático: revierte al task definition anterior en ECS
 ```
+
+**Botón de pánico (rollback manual):** `workflow_dispatch` en `cd.yml` con el ARN de la versión a la que revertir.
 
 Los tests de staging corren siempre contra lo que está desplegado — validan que el cambio parcial no rompió la integración con los demás componentes.
 

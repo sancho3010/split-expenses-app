@@ -76,8 +76,5 @@ def list_groups(db: Session) -> list[Group]:
         Lista de todos los grupos.
     """
     return (
-        db.query(Group)
-        .options(joinedload(Group.members))
-        .order_by(Group.created_at.desc())
-        .all()
+        db.query(Group).options(joinedload(Group.members)).order_by(Group.created_at.desc()).all()
     )

@@ -131,9 +131,7 @@ def delete_expense(db: Session, group_id: UUID, expense_id: UUID) -> bool:
         True si se eliminó, False si no se encontró.
     """
     expense = (
-        db.query(Expense)
-        .filter(Expense.id == expense_id, Expense.group_id == group_id)
-        .first()
+        db.query(Expense).filter(Expense.id == expense_id, Expense.group_id == group_id).first()
     )
     if not expense:
         return False

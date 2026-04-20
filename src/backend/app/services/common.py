@@ -17,9 +17,4 @@ def get_group_with_members(db: Session, group_id: UUID) -> Group | None:
     Returns:
         El grupo encontrado o None si no existe.
     """
-    return (
-        db.query(Group)
-        .options(joinedload(Group.members))
-        .filter(Group.id == group_id)
-        .first()
-    )
+    return db.query(Group).options(joinedload(Group.members)).filter(Group.id == group_id).first()

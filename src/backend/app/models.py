@@ -30,21 +30,15 @@ class Group(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
-    members = relationship(
-        "Member", back_populates="group", cascade="all, delete-orphan"
-    )
-    expenses = relationship(
-        "Expense", back_populates="group", cascade="all, delete-orphan"
-    )
+    members = relationship("Member", back_populates="group", cascade="all, delete-orphan")
+    expenses = relationship("Expense", back_populates="group", cascade="all, delete-orphan")
 
 
 class Member(Base):
     """Modelo de miembro de un grupo."""
 
     __tablename__ = "members"
-    __table_args__ = (
-        UniqueConstraint("group_id", "name", name="uq_member_group_name"),
-    )
+    __table_args__ = (UniqueConstraint("group_id", "name", name="uq_member_group_name"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     group_id = Column(
@@ -59,9 +53,7 @@ class Member(Base):
 
     group = relationship("Group", back_populates="members")
     expenses_paid = relationship("Expense", back_populates="paid_by")
-    splits = relationship(
-        "ExpenseSplit", back_populates="member", cascade="all, delete-orphan"
-    )
+    splits = relationship("ExpenseSplit", back_populates="member", cascade="all, delete-orphan")
 
 
 class Expense(Base):
@@ -88,9 +80,7 @@ class Expense(Base):
 
     group = relationship("Group", back_populates="expenses")
     paid_by = relationship("Member", back_populates="expenses_paid")
-    splits = relationship(
-        "ExpenseSplit", back_populates="expense", cascade="all, delete-orphan"
-    )
+    splits = relationship("ExpenseSplit", back_populates="expense", cascade="all, delete-orphan")
 
 
 class ExpenseSplit(Base):

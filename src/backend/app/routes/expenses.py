@@ -68,10 +68,7 @@ def get_balances(group_id: UUID, db: Session = Depends(get_db)):
     except ValueError as exc:
         raise bad_request(str(exc)) from exc
 
-    return [
-        BalanceResponse(member=name, balance=balance)
-        for name, balance in balances.items()
-    ]
+    return [BalanceResponse(member=name, balance=balance) for name, balance in balances.items()]
 
 
 @router.get("/settlements", response_model=list[SettlementResponse])
