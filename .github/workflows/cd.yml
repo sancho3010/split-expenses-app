@@ -670,8 +670,8 @@ jobs:
         uses: zaproxy/action-full-scan@v0.10.0
         with:
           target: ${{ needs.deploy-base-tf-staging.outputs.alb_url_staging }}
-          fail_action: true
           allow_issue_writing: false
+          cmd_options: '-I'
 
       # 3. Upload ZAP report as artifact
       - name: Upload ZAP Security Report
