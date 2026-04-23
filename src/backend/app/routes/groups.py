@@ -1,5 +1,6 @@
 """Rutas API para gestión de grupos."""
 
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -12,9 +13,11 @@ from ..services import group_service
 
 router = APIRouter(prefix="/api/groups", tags=["groups"])
 
+DbSession = Annotated[Session, Depends(get_db)]
+
 
 @router.post("/", response_model=GroupResponse, status_code=201)
-def create_group(payload: GroupCreate, db: Session = Depends(get_db)):
+def create_group(payload: GroupCreate, db: DbSession):
     """Crea un grupo con sus miembros."""
     try:
         group = group_service.create_group(db, payload.name, payload.members)
@@ -25,7 +28,7 @@ def create_group(payload: GroupCreate, db: Session = Depends(get_db)):
 
 
 @router.get("/", response_model=list[GroupListItem])
-def list_groups(db: Session = Depends(get_db)):
+def list_groups(db: DbSession):
     """Lista todos los grupos."""
     groups = group_service.list_groups(db)
     return [
@@ -40,7 +43,7 @@ def list_groups(db: Session = Depends(get_db)):
 
 
 @router.get("/{group_id}", response_model=GroupResponse)
-def get_group(group_id: UUID, db: Session = Depends(get_db)):
+def get_group(group_id: UUID, db: DbSession):
     """Obtiene el detalle de un grupo."""
     group = group_service.get_group(db, group_id)
     if not group:

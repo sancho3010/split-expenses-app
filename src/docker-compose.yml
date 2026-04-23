@@ -2,15 +2,15 @@ services:
   database:
     build: ./database
     environment:
-      POSTGRES_USER: splitwise
-      POSTGRES_PASSWORD: splitwise
-      POSTGRES_DB: splitwise
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U splitwise -d splitwise"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 3s
       timeout: 3s
       retries: 10
@@ -21,7 +21,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://splitwise:splitwise@database:5432/splitwise
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB}
       APP_ENV: development
       CORS_ORIGINS: '["http://localhost:3000","http://localhost:8080"]'
     depends_on:
@@ -30,7 +30,7 @@ services:
     # Override para desarrollo local: espera DB + migraciones + hot reload
     command: >
       sh -c "
-        until pg_isready -h database -U splitwise 2>/dev/null; do
+        until pg_isready -h database -U ${POSTGRES_USER} 2>/dev/null; do
           echo 'Esperando DB...' && sleep 2;
         done &&
         sleep 2 &&

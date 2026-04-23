@@ -2,7 +2,7 @@
  * Capa de comunicación con la API REST del backend.
  * Todas las llamadas HTTP al backend pasan por aquí.
  */
-const API_BASE = window.API_BASE_URL || "/api";
+const API_BASE = globalThis.API_BASE_URL || "/api";
 
 const api = {
     async request(method, path, body = null) {
