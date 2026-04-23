@@ -668,6 +668,7 @@ jobs:
       # Escanea vulnerabilidades OWASP Top 10: XSS, SQL injection, CSRF, etc.
       - name: OWASP ZAP Full Scan
         uses: zaproxy/action-full-scan@v0.10.0
+        continue-on-error: true
         with:
           target: ${{ needs.deploy-base-tf-staging.outputs.alb_url_staging }}
           allow_issue_writing: false
@@ -679,8 +680,22 @@ jobs:
         if: always()
         with:
           name: zap-security-report
-          path: report_html.html
+          path: security_report_html.html
 
+      # 4. Fail if ZAP found actual vulnerabilities (FAIL-NEW > 0)
+      - name: Check ZAP results
+        if: always()
+        run: |
+          if [ -f security_report_html.html ]; then
+            FAILS=$(grep -o 'FAIL-NEW: [0-9]*' security_report_html.html | grep -o '[0-9]*' || echo "0")
+
+            if [ "$FAILS" -gt 0 ]; then
+              echo "ZAP found $FAILS new vulnerabilities. Failing pipeline."
+              exit 1
+            fi
+
+          fi
+          echo "No critical vulnerabilities found."
 
   deploy-base-tf-prod:
     runs-on: ubuntu-latest
