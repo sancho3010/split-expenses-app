@@ -66,7 +66,7 @@ data "aws_security_group" "ecs_sg" {
 
 # -------------------- Target Group ---------------------------------
 resource "aws_lb_target_group" "ecs_tg" {
-  name        = "${local.prefix}-${local.component}-tg"
+  name        = "${local.prefix}-be-tg"
   port        = 8000
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
