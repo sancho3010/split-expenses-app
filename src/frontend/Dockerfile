@@ -19,4 +19,4 @@ RUN chown -R nginx:nginx /usr/share/nginx/html && \
     chown nginx:nginx /var/run/nginx.pid
 USER nginx
 
-EXPOSE 80
+EXPOSE 8080
