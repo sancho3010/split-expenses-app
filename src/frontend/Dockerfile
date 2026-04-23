@@ -1,10 +1,10 @@
 FROM nginx:1.27-alpine
 
-# Eliminar config default
-RUN rm /etc/nginx/conf.d/default.conf
+# Reemplazar la config principal de nginx completa
+COPY nginx.conf /etc/nginx/nginx.conf
 
-# Copiar nuestra config
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Eliminar configs default que puedan incluir listen 80
+RUN rm -f /etc/nginx/conf.d/*
 
 # Copiar archivos estáticos
 COPY index.html /usr/share/nginx/html/

@@ -1,2 +1,2 @@
-# Split de Gastos - Backend API
+# Split de Gastos for Backend API
 # CI/CD pipeline validated
