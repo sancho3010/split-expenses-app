@@ -38,9 +38,11 @@ jobs:
           --health-retries 5
 
     steps:
-      # 1. Clone repo
+      # 1. Clone repo (full history for SonarCloud blame)
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # 2. Set up Python
       - name: Set up Python
