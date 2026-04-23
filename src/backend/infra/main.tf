@@ -1,4 +1,4 @@
-# Infra: Main Definition for Backend.
+# Infra: Main Definition for Backend in AWS
 
 terraform {
   required_version = ">= 1.6.0"
@@ -184,6 +184,11 @@ resource "aws_ecs_service" "main" {
 
   deployment_minimum_healthy_percent = 50
   deployment_maximum_percent         = 200
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
 
   lifecycle {
     ignore_changes = [desired_count]

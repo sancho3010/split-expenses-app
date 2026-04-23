@@ -32,11 +32,18 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 2
+
+      - name: Get parent commit
+        id: parent
+        run: echo "sha=$(git rev-parse HEAD~1)" >> $GITHUB_OUTPUT
 
       - name: Filter paths
         id: filter
         uses: dorny/paths-filter@v3
         with:
+          base: ${{ steps.parent.outputs.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           filters: |
             backend:
               - 'src/backend/**'
@@ -273,6 +280,40 @@ jobs:
 
           echo "DB NAME Staging: $DB_NAME"
           echo "db_name=${DB_NAME}" >> $GITHUB_OUTPUT
+
+      # 8. Run Alembic migrations against RDS
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies
+        working-directory: src/backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Alembic migrations (Staging)
+        working-directory: src/backend
+        run: |
+          DB_ENDPOINT=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-staging-database \
+            --query "DBInstances[0].Endpoint.Address" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+          DB_PORT=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-staging-database \
+            --query "DBInstances[0].Endpoint.Port" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+          DB_NAME=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-staging-database \
+            --query "DBInstances[0].DBName" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+
+          export DATABASE_URL="postgresql://${{ secrets.DB_USERNAME }}:${{ secrets.DB_PASSWORD }}@${DB_ENDPOINT}:${DB_PORT}/${DB_NAME}"
+          alembic upgrade head
 
 
   deploy-backend-tf-staging:
@@ -900,6 +941,40 @@ jobs:
 
           echo "DB NAME prod: $DB_NAME"
           echo "db_name=${DB_NAME}" >> $GITHUB_OUTPUT
+
+      # 8. Run Alembic migrations against RDS
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies
+        working-directory: src/backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Alembic migrations (prod)
+        working-directory: src/backend
+        run: |
+          DB_ENDPOINT=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-production-database \
+            --query "DBInstances[0].Endpoint.Address" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+          DB_PORT=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-production-database \
+            --query "DBInstances[0].Endpoint.Port" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+          DB_NAME=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-production-database \
+            --query "DBInstances[0].DBName" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+
+          export DATABASE_URL="postgresql://${{ secrets.DB_USERNAME }}:${{ secrets.DB_PASSWORD }}@${DB_ENDPOINT}:${DB_PORT}/${DB_NAME}"
+          alembic upgrade head
 
 
   deploy-backend-tf-prod:
