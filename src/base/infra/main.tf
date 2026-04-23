@@ -24,7 +24,7 @@ locals {
     Component    = "base"
     ManagedBy    = "terraform"
     CostCenter   = "Devops-Eafit"
-    SupportEmail = "shiguitau1@eafit.edu.co, icamayaa@eafit.edu.co, sarozos@eafit.edu.co, soviedop@eafit.edu.co"
+    SupportEmail = "shiguitau1@eafit.edu.co : icamayaa@eafit.edu.co : sarozos@eafit.edu.co : soviedop@eafit.edu.co"
   }
 }
 
