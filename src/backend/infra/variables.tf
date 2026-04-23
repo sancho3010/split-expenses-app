@@ -1,4 +1,6 @@
 
+# Infra: Variables Definition
+
 variable "environment_name" {
   description = "Nombre del entorno (ej: staging, production). Usado para nombrar recursos."
   type        = string
