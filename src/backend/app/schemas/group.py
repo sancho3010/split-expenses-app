@@ -1,5 +1,7 @@
 """Schemas de grupos y miembros."""
 
+# pylint: disable=too-few-public-methods
+
 from datetime import datetime
 from uuid import UUID
 
@@ -18,12 +20,8 @@ class MemberResponse(AppSchema):
 class GroupCreate(AppSchema):
     """Request para crear un grupo."""
 
-    name: str = Field(
-        ..., min_length=1, max_length=100, examples=["Viaje a Santa Marta"]
-    )
-    members: list[str] = Field(
-        ..., min_length=2, examples=[["Samuel", "Isis", "Santiago"]]
-    )
+    name: str = Field(..., min_length=1, max_length=100, examples=["Viaje a Santa Marta"])
+    members: list[str] = Field(..., min_length=2, examples=[["Samuel", "Isis", "Santiago"]])
 
 
 class GroupListItem(AppSchema):

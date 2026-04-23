@@ -1,5 +1,7 @@
 """Schemas de gastos."""
 
+# pylint: disable=too-few-public-methods
+
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
@@ -19,9 +21,7 @@ class ExpenseSplitResponse(AppSchema):
 class ExpenseCreate(AppSchema):
     """Request para crear un gasto."""
 
-    description: str = Field(
-        ..., min_length=1, max_length=200, examples=["Hotel en Santa Marta"]
-    )
+    description: str = Field(..., min_length=1, max_length=200, examples=["Hotel en Santa Marta"])
     amount: Decimal = Field(..., gt=0, examples=[400000])
     paid_by_id: UUID
     split_among_ids: list[UUID] | None = Field(

@@ -1,12 +1,14 @@
 """Configuración de la aplicación desde variables de entorno."""
 
+# pylint: disable=too-few-public-methods
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     """Settings de la aplicación, cargados desde variables de entorno."""
 
-    database_url: str = "postgresql://splitwise:splitwise@localhost:5432/splitwise"
+    # Set via DATABASE_URL env var. Default is for local development only.
+    database_url: str = "postgresql://localhost/splitwise"
     app_env: str = "development"
     port: int = 8000
     app_name: str = "Split de Gastos API"

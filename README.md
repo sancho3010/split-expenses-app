@@ -60,12 +60,10 @@ docker compose up --build
 │       ├── ci-frontend.yml     # CI del frontend
 │       ├── ci-database.yml     # CI de migraciones
 │       └── cd.yml              # CD a staging y producción
-├── specs/
-│   ├── 01_requirements.md      # Historias de usuario y requisitos
-│   ├── 02_design.md            # Diseño técnico
-│   └── 03_tasks.md             # Tareas de implementación
 ├── src/
 │   ├── docker-compose.yml
+│   ├── base/
+│   │   └── infra/              # IaC compartida (cluster ECS, ALB, security groups)
 │   ├── backend/
 │   │   ├── Dockerfile
 │   │   ├── requirements.txt
@@ -79,18 +77,26 @@ docker compose up --build
 │   │   │   ├── routes/         # Endpoints API
 │   │   │   ├── schemas/        # Pydantic schemas
 │   │   │   └── services/       # Lógica de negocio
+│   │   ├── infra/              # IaC backend (ECS service, target group)
 │   │   └── tests/
+│   │       ├── unit/           # Tests unitarios (lógica pura, sin BD)
+│   │       └── integration/    # Tests de integración (rutas + BD)
 │   ├── frontend/
 │   │   ├── Dockerfile
 │   │   ├── nginx.conf
 │   │   ├── index.html
 │   │   ├── css/style.css
+│   │   ├── infra/              # IaC frontend (ECS service, target group)
 │   │   └── js/
 │   │       ├── api.js          # Capa HTTP
 │   │       └── app.js          # Lógica UI
-│   └── database/
-│       ├── Dockerfile
-│       └── init/
+│   ├── database/
+│   │   ├── Dockerfile
+│   │   ├── infra/              # IaC database (RDS PostgreSQL)
+│   │   └── init/
+│   └── tests/
+│       ├── acceptance/         # Tests de aceptación con Selenium (CD staging)
+│       └── smoke/              # Tests de humo (CD producción)
 └── .gitignore
 ```
 
@@ -137,7 +143,12 @@ test-staging (aceptación + E2E + seguridad)
 deploy-prod (mismo orden)
      ↓
 smoke-test-prod
+     ↓
+rollback-prod (si smoke tests fallan)
+  → automático: revierte al task definition anterior en ECS
 ```
+
+**Botón de pánico (rollback manual):** `workflow_dispatch` en `cd.yml` con el ARN de la versión a la que revertir.
 
 Los tests de staging corren siempre contra lo que está desplegado — validan que el cambio parcial no rompió la integración con los demás componentes.
 

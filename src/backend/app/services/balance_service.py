@@ -52,9 +52,7 @@ def calculate_balances(db: Session, group_id: UUID) -> dict[str, Decimal]:
     return {member_names[mid]: balance for mid, balance in balances.items()}
 
 
-def calculate_settlements(
-    db: Session, group_id: UUID
-) -> list[dict[str, str | Decimal]]:
+def calculate_settlements(db: Session, group_id: UUID) -> list[dict[str, str | Decimal]]:
     """Calcula las transferencias mínimas para saldar todas las deudas.
 
     Usa un algoritmo greedy: empareja el mayor deudor con el mayor
