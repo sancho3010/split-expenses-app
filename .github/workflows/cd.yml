@@ -673,6 +673,7 @@ jobs:
           target: ${{ needs.deploy-base-tf-staging.outputs.alb_url_staging }}
           allow_issue_writing: false
           cmd_options: '-I'
+          artifact_name: ''
 
       # 3. Upload ZAP report as artifact
       - name: Upload ZAP Security Report
@@ -700,7 +701,10 @@ jobs:
   deploy-base-tf-prod:
     runs-on: ubuntu-latest
     needs: [detect-changes, security-test-staging]
-    if: github.event.workflow_run.conclusion == 'success'
+    if: |
+      always() &&
+      github.event.workflow_run.conclusion == 'success' &&
+      needs.security-test-staging.result == 'success'
     defaults:
       run:
         working-directory: src/base/infra
