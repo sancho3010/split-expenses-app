@@ -140,8 +140,8 @@ jobs:
         id: docker_build_push
         uses: docker/build-push-action@v5
         with:
-          context: .
-          file: ./Dockerfile
+          context: src/backend
+          file: src/backend/Dockerfile
           push: true
           tags: |
             ${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}-${{ env.COMPONENT }}:${{ github.sha }}
