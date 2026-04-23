@@ -3,23 +3,26 @@ name: CD Pipeline AWS con Terraform
 # Disparadores del Workflow
 on:
   workflow_run:
-    workflows: ["CI pipeline for backend", "CI pipeline for frontend", "CI pipeline for database"]
+    workflows: ["CI pipeline"]
     types: [completed]
     branches: [main]
 
   workflow_dispatch:  # Permite ejecución manual desde la UI de Github Actions
 
-# Evitar race conditions: solo un CD a la vez por entorno
+
 concurrency:
-  group: cd-deploy
+  group: cd-${{ github.ref }}
   cancel-in-progress: false
+
 
 # Definición de los trabajos (Jobs)
 jobs:
 
   deploy-base-tf-staging:
     runs-on: ubuntu-latest
-    if: github.event.workflow_run.conclusion == 'success'
+    if: |
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
     defaults:
       run:
         working-directory: src/base/infra
@@ -142,8 +145,8 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.name == 'CI pipeline for database' &&
-      needs.deploy-base-tf-staging.result == 'success'
+      needs.deploy-base-tf-staging.result == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
     needs: deploy-base-tf-staging
     defaults:
       run:
@@ -248,8 +251,8 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.name == 'CI pipeline for backend' &&
-      needs.deploy-base-tf-staging.result == 'success'
+      needs.deploy-base-tf-staging.result == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
     needs: [deploy-base-tf-staging, deploy-database-tf-staging]
     defaults:
       run:
@@ -380,8 +383,8 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.name == 'CI pipeline for frontend' &&
-      needs.deploy-base-tf-staging.result == 'success'
+      needs.deploy-base-tf-staging.result == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
     needs: [deploy-base-tf-staging, deploy-database-tf-staging, deploy-backend-tf-staging]
     defaults:
       run:
@@ -528,14 +531,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src/tests/requirements.txt  # Incluye selenium, pytest
 
-      # 5. Run acceptance tests against staging
-      - name: Run Acceptance Tests against Staging
+      # 5. Wait for application to be ready
+      - name: Wait for application readiness
         env:
           APP_BASE_URL: ${{ needs.deploy-base-tf-staging.outputs.alb_url_staging }}
         run: |
-          echo "Running acceptance tests against: $APP_BASE_URL"
-          sleep 45
-          pytest src/tests/acceptance/test_acceptance.py
+          echo "Waiting for $APP_BASE_URL to be ready..."
+          for i in $(seq 1 30); do
+            if curl -sf --max-time 5 "$APP_BASE_URL" > /dev/null 2>&1; then
+              echo "Application is ready after attempt $i"
+              exit 0
+
+            fi
+
+            echo "Attempt $i/30: not ready, retrying in 5s..."
+            sleep 5
+
+          done
+          echo "ERROR: Application not ready after 150s"
+          exit 1
+
+      # 6. Run acceptance tests against staging
+      - name: Run Acceptance Tests against Staging
+        env:
+          APP_BASE_URL: ${{ needs.deploy-base-tf-staging.outputs.alb_url_staging }}
+        run: pytest src/tests/acceptance/test_acceptance.py
 
   security-test-staging:
     runs-on: ubuntu-latest
@@ -694,7 +714,6 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.name == 'CI pipeline for database' &&
       needs.deploy-base-tf-prod.result == 'success'
     needs: deploy-base-tf-prod
     defaults:
@@ -800,7 +819,6 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.name == 'CI pipeline for backend' &&
       needs.deploy-base-tf-prod.result == 'success'
     needs: [deploy-base-tf-prod, deploy-database-tf-prod]
     defaults:
@@ -933,7 +951,6 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.name == 'CI pipeline for frontend' &&
       needs.deploy-base-tf-prod.result == 'success'
     needs: [deploy-base-tf-prod, deploy-database-tf-prod, deploy-backend-tf-prod]
     defaults:
@@ -1076,11 +1093,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r src/tests/requirements.txt
 
-      # 4. Run smoke tests against production
-      - name: Run Smoke Tests against Production
+      # 4. Wait for application to be ready
+      - name: Wait for application readiness
         env:
           APP_BASE_URL: ${{ needs.deploy-base-tf-prod.outputs.alb_url_prod }}
         run: |
-          echo "Running smoke tests against: $APP_BASE_URL"
-          sleep 45
-          pytest src/tests/smoke/test_smoke.py
+          echo "Waiting for $APP_BASE_URL to be ready..."
+          for i in $(seq 1 30); do
+            if curl -sf --max-time 5 "$APP_BASE_URL" > /dev/null 2>&1; then
+              echo "Application is ready after attempt $i"
+              exit 0
+  
+            fi
+
+            echo "Attempt $i/30: not ready, retrying in 5s..."
+            sleep 5
+          done
+
+          echo "ERROR: Application not ready after 150s"
+          exit 1
+
+      # 5. Run smoke tests against production
+      - name: Run Smoke Tests against Production
+        env:
+          APP_BASE_URL: ${{ needs.deploy-base-tf-prod.outputs.alb_url_prod }}
+        run: pytest src/tests/smoke/test_smoke.py
