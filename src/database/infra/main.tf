@@ -1,4 +1,4 @@
-# Infra: Main Definition
+# Infra: Main Definition for Database in AWS
 
 terraform {
   required_version = ">= 1.6.0"
