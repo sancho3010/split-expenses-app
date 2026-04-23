@@ -64,8 +64,8 @@ resource "aws_security_group" "ecs_sg" {
 
   ingress {
     description     = "Trafico desde el ALB"
-    from_port       = 80
-    to_port         = 80
+    from_port       = 8080
+    to_port         = 8080
     protocol        = "tcp"
     security_groups = [data.aws_security_group.alb_sg.id]
   }
@@ -83,7 +83,7 @@ resource "aws_security_group" "ecs_sg" {
 # -------------------- Target Group ---------------------------------
 resource "aws_lb_target_group" "ecs_tg" {
   name        = "${local.prefix}-fe-tg"
-  port        = 80
+  port        = 8080
   protocol    = "HTTP"
   vpc_id      = var.vpc_id
   target_type = "ip"
@@ -91,7 +91,7 @@ resource "aws_lb_target_group" "ecs_tg" {
   health_check {
     enabled             = true
     path                = "/"
-    port                = "80"
+    port                = "8080"
     protocol            = "HTTP"
     healthy_threshold   = 2
     unhealthy_threshold = 2
@@ -138,7 +138,7 @@ resource "aws_ecs_task_definition" "app" {
 
       portMappings = [
         {
-          containerPort = 80
+          containerPort = 8080
           protocol      = "tcp"
         }
       ]
@@ -185,7 +185,7 @@ resource "aws_ecs_service" "main" {
   load_balancer {
     target_group_arn = aws_lb_target_group.ecs_tg.arn
     container_name   = "${local.prefix}-${local.component}-container"
-    container_port   = 80
+    container_port   = 8080
   }
 
   deployment_minimum_healthy_percent = 50
