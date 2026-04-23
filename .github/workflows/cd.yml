@@ -353,8 +353,24 @@ jobs:
           SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
             awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
 
-          # Construir DATABASE_URL con outputs de database y secretos
-          DATABASE_URL="postgresql://${{ secrets.DB_USERNAME }}:${{ secrets.DB_PASSWORD }}@${{ needs.deploy-database-tf-staging.outputs.db_endpoint_staging }}/${{ needs.deploy-database-tf-staging.outputs.db_name_staging }}"
+          # Construir DATABASE_URL consultando el endpoint de RDS directamente
+          # (evita enmascaramiento de secretos en outputs entre jobs)
+          DB_ENDPOINT=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-staging-database \
+            --query "DBInstances[0].Endpoint.Address" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+          DB_PORT=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-staging-database \
+            --query "DBInstances[0].Endpoint.Port" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+          DB_NAME=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-staging-database \
+            --query "DBInstances[0].DBName" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+          DATABASE_URL="postgresql://${{ secrets.DB_USERNAME }}:${{ secrets.DB_PASSWORD }}@${DB_ENDPOINT}:${DB_PORT}/${DB_NAME}"
 
           # Convertir CORS_ORIGINS en lista HCL
           CORS_LIST=$(echo "${{ vars.CORS_ORIGINS_STAGING }}" | \
@@ -408,24 +424,27 @@ jobs:
           aws-region: ${{ vars.TF_REGION_NAME }}
 
       - name: Force New Deployment ECS Service Staging for Backend
+        env:
+          ENV_NAME: staging
+          COMPONENT: backend
         run: |
           CLUSTER="${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }}"
-          SERVICE="${{ needs.deploy-backend-tf-staging.outputs.ecs_service_name_staging }}"
+          SERVICE="splitwise-lite-${ENV_NAME}-${COMPONENT}-service"
 
-          echo "Forcing new deployment (Backend) for Staging service..."
+          echo "Forcing new deployment (${COMPONENT}) for ${ENV_NAME} service..."
           aws ecs update-service \
             --cluster "$CLUSTER" \
             --service "$SERVICE" \
             --force-new-deployment \
             --region "${{ vars.TF_REGION_NAME }}"
 
-          echo "Waiting for Staging service deployment to stabilize..."
+          echo "Waiting for ${ENV_NAME} service deployment to stabilize..."
           aws ecs wait services-stable \
             --cluster "$CLUSTER" \
             --services "$SERVICE" \
             --region "${{ vars.TF_REGION_NAME }}"
 
-          echo "Staging backend service deployment stable."
+          echo "${ENV_NAME} ${COMPONENT} service deployment stable."
 
   deploy-frontend-tf-staging:
     runs-on: ubuntu-latest
@@ -961,8 +980,23 @@ jobs:
           SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
             awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
 
-          # Construir DATABASE_URL con outputs de database y secretos
-          DATABASE_URL="postgresql://${{ secrets.DB_USERNAME }}:${{ secrets.DB_PASSWORD }}@${{ needs.deploy-database-tf-prod.outputs.db_endpoint_prod }}/${{ needs.deploy-database-tf-prod.outputs.db_name_prod }}"
+          # Construir DATABASE_URL consultando el endpoint de RDS directamente
+          DB_ENDPOINT=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-production-database \
+            --query "DBInstances[0].Endpoint.Address" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+          DB_PORT=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-production-database \
+            --query "DBInstances[0].Endpoint.Port" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+          DB_NAME=$(aws rds describe-db-instances \
+            --db-instance-identifier splitwise-lite-production-database \
+            --query "DBInstances[0].DBName" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+          DATABASE_URL="postgresql://${{ secrets.DB_USERNAME }}:${{ secrets.DB_PASSWORD }}@${DB_ENDPOINT}:${DB_PORT}/${DB_NAME}"
 
           # Convertir CORS_ORIGINS en lista HCL
           CORS_LIST=$(echo "${{ vars.CORS_ORIGINS_PRODUCTION }}" | \
@@ -1019,24 +1053,27 @@ jobs:
           aws-region: ${{ vars.TF_REGION_NAME }}
 
       - name: Force New Deployment ECS Service prod for Backend
+        env:
+          ENV_NAME: production
+          COMPONENT: backend
         run: |
           CLUSTER="${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }}"
-          SERVICE="${{ needs.deploy-backend-tf-prod.outputs.ecs_service_name_prod }}"
+          SERVICE="splitwise-lite-${ENV_NAME}-${COMPONENT}-service"
 
-          echo "Forcing new deployment (Backend) for prod service..."
+          echo "Forcing new deployment (${COMPONENT}) for ${ENV_NAME} service..."
           aws ecs update-service \
             --cluster "$CLUSTER" \
             --service "$SERVICE" \
             --force-new-deployment \
             --region "${{ vars.TF_REGION_NAME }}"
 
-          echo "Waiting for prod service deployment to stabilize..."
+          echo "Waiting for ${ENV_NAME} service deployment to stabilize..."
           aws ecs wait services-stable \
             --cluster "$CLUSTER" \
             --services "$SERVICE" \
             --region "${{ vars.TF_REGION_NAME }}"
 
-          echo "prod backend service deployment stable."
+          echo "${ENV_NAME} ${COMPONENT} service deployment stable."
 
 
   deploy-frontend-tf-prod:
