@@ -27,7 +27,7 @@ repos:
     hooks:
       - id: pytest-unit
         name: Run unit tests
-        entry: bash -c 'cd src/backend && python -m pytest tests/ -v -x'
+        entry: bash -c 'cd src/backend && python3 -m pytest tests/unit/ -v -x'
         language: system
         pass_filenames: false
         always_run: true

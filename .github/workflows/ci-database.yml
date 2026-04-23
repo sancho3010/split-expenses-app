@@ -1,1 +1,108 @@
-# TODO
+name: CI pipeline for database
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/database/**'
+      - 'src/backend/alembic/**'
+
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/database/**'
+      - 'src/backend/alembic/**'
+
+  workflow_dispatch:
+
+jobs:
+
+  validate-and-build:
+    runs-on: ubuntu-latest
+    env:
+      COMPONENT: database
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: splitwise
+          POSTGRES_PASSWORD: splitwise
+          POSTGRES_DB: splitwise
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 5
+    outputs:
+      repo_name: ${{ steps.set_outputs.outputs.repo_name }}
+      image_tag: ${{ steps.set_outputs.outputs.image_tag }}
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Set up Python (needed for Alembic)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 3. Install backend deps (includes Alembic + SQLAlchemy)
+      - name: Install Python dependencies
+        working-directory: src/backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. Validate migrations run without errors
+      - name: Run Alembic migrations
+        working-directory: src/backend
+        env:
+          DATABASE_URL: postgresql://splitwise:splitwise@localhost:5432/splitwise
+        run: alembic upgrade head
+
+      # 5. QEMU for multi-platform builds (push to main only)
+      - name: Set up QEMU
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/setup-qemu-action@v3
+
+      # 6. Advanced Docker builder
+      - name: Set up Docker Buildx
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/setup-buildx-action@v3
+
+      # 7. Authenticate with Docker Hub
+      - name: Login to Docker Hub
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # 8. Build and push image
+      - name: Build and push Docker image
+        id: docker_build_push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v5
+        with:
+          context: src/database
+          file: src/database/Dockerfile
+          push: true
+          tags: |
+            ${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}-${{ env.COMPONENT }}:${{ github.sha }}
+            ${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}-${{ env.COMPONENT }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 9. Export outputs for CD
+      - name: Set Job Outputs
+        id: set_outputs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          echo "repo_name=${{ github.event.repository.name }}-${{ env.COMPONENT }}" >> $GITHUB_OUTPUT
+          echo "image_tag=${{ github.sha }}" >> $GITHUB_OUTPUT

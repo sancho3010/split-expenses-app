@@ -13,6 +13,6 @@ disable = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-addopts = "-v --color=yes --tb=short"
+addopts = "-v --color=yes --tb=short --cov=app --cov-report=html --cov-report=term-missing"
 testpaths = ["tests"]
 norecursedirs = [".git", "venv", "env", ".*", "_*", "build", "dist", "htmlcov", "alembic"]

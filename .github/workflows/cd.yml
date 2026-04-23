@@ -1,1 +1,1083 @@
 # TODO
+name: CD Pipeline AWS con Terraform
+
+# Disparadores del Workflow
+on:
+  workflow_run:
+    workflows: ["CI pipeline for backend", "CI pipeline for frontend", "CI pipeline for database"]
+    types: [completed]
+    branches: [main]
+
+  workflow_dispatch:  # Permite ejecución manual desde la UI de Github Actions
+
+
+# Definición de los trabajos (Jobs)
+jobs:
+
+  deploy-base-tf-staging:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    defaults:
+      run:
+        working-directory: src/base/infra
+    outputs:
+      alb_url_staging: ${{ steps.get_tf_base_outputs.outputs.alb_url }}
+      ecs_cluster_name_staging: ${{ steps.get_tf_base_outputs.outputs.ecs_cluster_name }}
+      ecs_cluster_arn_staging: ${{ steps.get_tf_base_outputs.outputs.ecs_cluster_arn }}
+      ecs_backend_sg_id_staging: ${{ steps.get_tf_base_outputs.outputs.ecs_backend_sg_id }}
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.TF_REGION_NAME }}
+
+      # 3. Ensure Terraform state bucket exists
+      - name: Ensure Terraform State Bucket
+        run: |
+          if [ -z "${{ vars.TF_STATE_BUCKET_STAGING }}" ]; then
+            echo "Error: Debes definir la variable del repositorio TF_STATE_BUCKET."
+            exit 1
+          fi
+
+          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" 2>/dev/null; then
+            echo "El bucket de estado ya existe."
+
+          else
+            echo "Creando bucket de estado ${{ vars.TF_STATE_BUCKET_STAGING }}..."
+            aws s3api create-bucket --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" --region "${{ vars.TF_REGION_NAME }}"
+          fi
+
+          aws s3api put-bucket-versioning \
+            --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" \
+            --versioning-configuration Status=Enabled
+
+      # 4. Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+          terraform_wrapper: false
+
+      # 5. Init Terraform with remote S3 backend
+      - name: Terraform Init (Staging)
+        run: |
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET_STAGING }}" \
+            -backend-config="key=staging/base/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_REGION_NAME }}"
+
+      # 6. Apply Terraform (Staging)
+      - name: Terraform Apply (Staging)
+        env:
+          TF_VAR_environment_name: staging
+          TF_VAR_lab_role_arn: ${{ vars.LAB_ROLE_ARN }}
+          TF_VAR_vpc_id: ${{ vars.VPC_ID }}
+        run: |
+          # Convertir "subnet-xxx,subnet-yyy" en ["subnet-xxx","subnet-yyy"] para Terraform
+          SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
+            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
+
+          terraform apply -auto-approve \
+            -var="subnet_ids=${SUBNET_LIST}"
+
+      # 7. Export Terraform outputs
+      - name: Get Terraform Base Outputs (Staging)
+        id: get_tf_base_outputs
+        run: |
+          ALB_URL=$(terraform output -raw alb_url)
+
+          if [ -z "$ALB_URL" ]; then
+            echo "Error: No se pudo obtener alb_url de Terraform (Staging)."
+            exit 1
+          fi
+
+          echo "ALB URL Staging: $ALB_URL"
+          echo "alb_url=${ALB_URL}" >> $GITHUB_OUTPUT
+
+          ECS_CLUSTER_NAME=$(terraform output -raw ecs_cluster_name)
+
+          if [ -z "$ECS_CLUSTER_NAME" ]; then
+            echo "Error: No se pudo obtener ecs_cluster_name de Terraform (Staging)"
+            exit 1
+          fi
+
+          echo "ECS CLUSTER NAME Staging: $ECS_CLUSTER_NAME"
+          echo "ecs_cluster_name=${ECS_CLUSTER_NAME}" >> $GITHUB_OUTPUT
+
+          ECS_CLUSTER_ARN=$(terraform output -raw ecs_cluster_arn)
+
+          if [ -z "$ECS_CLUSTER_ARN" ]; then
+            echo "Error: No se pudo obtener ecs_cluster_arn de Terraform (Staging)"
+            exit 1
+          fi
+
+          echo "ECS CLUSTER ARN Staging: $ECS_CLUSTER_ARN"
+          echo "ecs_cluster_arn=${ECS_CLUSTER_ARN}" >> $GITHUB_OUTPUT
+
+          ECS_BACKEND_SG_ID=$(terraform output -raw ecs_backend_sg_id)
+
+          if [ -z "$ECS_BACKEND_SG_ID" ]; then
+            echo "Error: No se pudo obtener ecs_backend_sg_id de Terraform (Staging)"
+            exit 1
+          fi
+
+          echo "ECS CLUSTER ARN Staging: $ECS_BACKEND_SG_ID"
+          echo "ecs_backend_sg_id=${ECS_BACKEND_SG_ID}" >> $GITHUB_OUTPUT
+
+
+  deploy-database-tf-staging:
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.name == 'CI pipeline for database' &&
+      needs.deploy-base-tf-staging.result == 'success'
+    needs: deploy-base-tf-staging
+    defaults:
+      run:
+        working-directory: src/database/infra
+    outputs:
+      db_endpoint_staging: ${{ steps.get_tf_database_outputs.outputs.db_endpoint }}
+      db_name_staging: ${{ steps.get_tf_database_outputs.outputs.db_name }}
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.TF_REGION_NAME }}
+
+      # 3. Ensure Terraform state bucket exists
+      - name: Ensure Terraform State Bucket
+        run: |
+          if [ -z "${{ vars.TF_STATE_BUCKET_STAGING }}" ]; then
+            echo "Error: Debes definir la variable del repositorio TF_STATE_BUCKET."
+            exit 1
+          fi
+
+          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" 2>/dev/null; then
+            echo "El bucket de estado ya existe."
+
+          else
+            echo "Creando bucket de estado ${{ vars.TF_STATE_BUCKET_STAGING }}..."
+            aws s3api create-bucket --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" --region "${{ vars.TF_REGION_NAME }}"
+          fi
+
+          aws s3api put-bucket-versioning \
+            --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" \
+            --versioning-configuration Status=Enabled
+
+      # 4. Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+          terraform_wrapper: false
+
+      # 5. Init Terraform with remote S3 backend
+      - name: Terraform Init (Staging)
+        run: |
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET_STAGING }}" \
+            -backend-config="key=staging/database/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_REGION_NAME }}"
+
+      # 6. Apply Terraform (Staging)
+      - name: Terraform Apply (Staging)
+        env:
+          TF_VAR_environment_name: staging
+          TF_VAR_lab_role_arn: ${{ vars.LAB_ROLE_ARN }}
+          TF_VAR_vpc_id: ${{ vars.VPC_ID }}
+          TF_VAR_db_username: ${{ secrets.DB_USERNAME }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_backend_ecs_sg_id: ${{ needs.deploy-base-tf-staging.outputs.ecs_backend_sg_id_staging }}
+        run: |
+          # Convertir "subnet-xxx,subnet-yyy" en ["subnet-xxx","subnet-yyy"] para Terraform
+          SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
+            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
+
+          terraform apply -auto-approve \
+            -var="subnet_ids=${SUBNET_LIST}"
+
+      # 7. Export Terraform outputs
+      - name: Get Terraform Database Outputs (Staging)
+        id: get_tf_database_outputs
+        run: |
+          DB_ENDPOINT=$(terraform output -raw db_endpoint)
+
+          if [ -z "$DB_ENDPOINT" ]; then
+            echo "Error: No se pudo obtener db_endpoint de Terraform (Staging)."
+            exit 1
+          fi
+
+          echo "DB ENDPOINT Staging: $DB_ENDPOINT"
+          echo "db_endpoint=${DB_ENDPOINT}" >> $GITHUB_OUTPUT
+
+          DB_NAME=$(terraform output -raw db_name)
+
+          if [ -z "$DB_NAME" ]; then
+            echo "Error: No se pudo obtener db_name de Terraform (Staging)."
+            exit 1
+          fi
+
+          echo "DB NAME Staging: $DB_NAME"
+          echo "db_name=${DB_NAME}" >> $GITHUB_OUTPUT
+
+
+  deploy-backend-tf-staging:
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.name == 'CI pipeline for backend' &&
+      needs.deploy-base-tf-staging.result == 'success'
+    needs: [deploy-base-tf-staging, deploy-database-tf-staging]
+    defaults:
+      run:
+        working-directory: src/backend/infra
+    outputs:
+      ecs_service_name_staging: ${{ steps.get_tf_backend_outputs.outputs.ecs_service_name }}
+      ecs_service_arn_staging: ${{ steps.get_tf_backend_outputs.outputs.ecs_service_arn }}
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.TF_REGION_NAME }}
+
+      # 3. Ensure Terraform state bucket exists
+      - name: Ensure Terraform State Bucket
+        run: |
+          if [ -z "${{ vars.TF_STATE_BUCKET_STAGING }}" ]; then
+            echo "Error: Debes definir la variable del repositorio TF_STATE_BUCKET."
+            exit 1
+          fi
+
+          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" 2>/dev/null; then
+            echo "El bucket de estado ya existe."
+
+          else
+            echo "Creando bucket de estado ${{ vars.TF_STATE_BUCKET_STAGING }}..."
+            aws s3api create-bucket --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" --region "${{ vars.TF_REGION_NAME }}"
+          fi
+
+          aws s3api put-bucket-versioning \
+            --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" \
+            --versioning-configuration Status=Enabled
+
+      # 4. Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+          terraform_wrapper: false
+
+      # 5. Init Terraform with remote S3 backend
+      - name: Terraform Init (Staging)
+        run: |
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET_STAGING }}" \
+            -backend-config="key=staging/backend/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_REGION_NAME }}"
+
+      # 6. Apply Terraform (Staging)
+      - name: Terraform Apply (Staging)
+        env:
+          TF_VAR_environment_name: staging
+          TF_VAR_lab_role_arn: ${{ vars.LAB_ROLE_ARN }}
+          TF_VAR_vpc_id: ${{ vars.VPC_ID }}
+          TF_VAR_cors_origins: ${{ vars.CORS_ORIGINS_STAGING }}
+          TF_VAR_docker_image_uri: "${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}-backend:${{ github.event.workflow_run.head_sha }}"
+        run: |
+          # Convertir "subnet-xxx,subnet-yyy" en ["subnet-xxx","subnet-yyy"] para Terraform
+          SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
+            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
+
+          # Construir DATABASE_URL con outputs de database y secretos
+          DATABASE_URL="postgresql://${{ secrets.DB_USERNAME }}:${{ secrets.DB_PASSWORD }}@${{ needs.deploy-database-tf-staging.outputs.db_endpoint_staging }}/${{ needs.deploy-database-tf-staging.outputs.db_name_staging }}"
+
+          # Convertir CORS_ORIGINS en lista HCL
+          CORS_LIST=$(echo "${{ vars.CORS_ORIGINS_STAGING }}" | \
+            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
+
+          terraform apply -auto-approve \
+            -var="subnet_ids=${SUBNET_LIST}" \
+            -var="database_url=${DATABASE_URL}" \
+            -var="cors_origins=${CORS_LIST}"
+
+      # 7. Export Terraform outputs
+      - name: Get Terraform Backend Outputs (Staging)
+        id: get_tf_backend_outputs
+        run: |
+          ECS_SERVICE_NAME=$(terraform output -raw ecs_service_name)
+
+          if [ -z "$ECS_SERVICE_NAME" ]; then
+            echo "Error: No se pudo obtener ecs_service_name de Terraform (Staging)."
+            exit 1
+          fi
+
+          echo "ECS SERVICE NAME Staging: $ECS_SERVICE_NAME"
+          echo "ecs_service_name=${ECS_SERVICE_NAME}" >> $GITHUB_OUTPUT
+
+          ECS_SERVICE_ARN=$(terraform output -raw ecs_service_arn)
+
+          if [ -z "$ECS_SERVICE_ARN" ]; then
+            echo "Error: No se pudo obtener ecs_service_arn de Terraform (Staging)."
+            exit 1
+          fi
+
+          echo "ECS SERVICE ARN Staging: $ECS_SERVICE_ARN"
+          echo "ecs_service_arn=${ECS_SERVICE_ARN}" >> $GITHUB_OUTPUT
+
+      # 8. Force new ECS deployment and wait for stability
+      - name: Force New Deployment ECS Service Staging for Backend
+        run: |
+          echo "Forcing new deployment (Backend) for Staging service..."
+          aws ecs update-service \
+            --cluster ${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }} \
+            --service ${{ steps.get_tf_backend_outputs.outputs.ecs_service_name }} \
+            --force-new-deployment \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          # Esperar a que el despliegue se estabilice
+          echo "Waiting for Staging service deployment to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }}\
+            --services ${{ steps.get_tf_backend_outputs.outputs.ecs_service_name }} \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "Staging service deployment stable."
+
+  deploy-frontend-tf-staging:
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.name == 'CI pipeline for frontend' &&
+      needs.deploy-base-tf-staging.result == 'success'
+    needs: [deploy-base-tf-staging, deploy-database-tf-staging, deploy-backend-tf-staging]
+    defaults:
+      run:
+        working-directory: src/frontend/infra
+    outputs:
+      ecs_service_name_staging: ${{ steps.get_tf_frontend_outputs.outputs.ecs_service_name }}
+      ecs_service_arn_staging: ${{ steps.get_tf_frontend_outputs.outputs.ecs_service_arn }}
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.TF_REGION_NAME }}
+
+      # 3. Ensure Terraform state bucket exists
+      - name: Ensure Terraform State Bucket
+        run: |
+          if [ -z "${{ vars.TF_STATE_BUCKET_STAGING }}" ]; then
+            echo "Error: Debes definir la variable del repositorio TF_STATE_BUCKET."
+            exit 1
+          fi
+
+          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" 2>/dev/null; then
+            echo "El bucket de estado ya existe."
+
+          else
+            echo "Creando bucket de estado ${{ vars.TF_STATE_BUCKET_STAGING }}..."
+            aws s3api create-bucket --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" --region "${{ vars.TF_REGION_NAME }}"
+          fi
+
+          aws s3api put-bucket-versioning \
+            --bucket "${{ vars.TF_STATE_BUCKET_STAGING }}" \
+            --versioning-configuration Status=Enabled
+
+      # 4. Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+          terraform_wrapper: false
+
+      # 5. Init Terraform with remote S3 backend
+      - name: Terraform Init (Staging)
+        run: |
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET_STAGING }}" \
+            -backend-config="key=staging/frontend/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_REGION_NAME }}"
+
+      # 6. Apply Terraform (Staging)
+      - name: Terraform Apply (Staging)
+        env:
+          TF_VAR_environment_name: staging
+          TF_VAR_lab_role_arn: ${{ vars.LAB_ROLE_ARN }}
+          TF_VAR_vpc_id: ${{ vars.VPC_ID }}
+          TF_VAR_docker_image_uri: "${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}-frontend:${{ github.event.workflow_run.head_sha }}"
+        run: |
+          # Convertir "subnet-xxx,subnet-yyy" en ["subnet-xxx","subnet-yyy"] para Terraform
+          SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
+            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
+
+          terraform apply -auto-approve \
+            -var="subnet_ids=${SUBNET_LIST}"
+
+      # 7. Export Terraform outputs
+      - name: Get Terraform Frontend Outputs (Staging)
+        id: get_tf_frontend_outputs
+        run: |
+          ECS_SERVICE_NAME=$(terraform output -raw ecs_service_name)
+
+          if [ -z "$ECS_SERVICE_NAME" ]; then
+            echo "Error: No se pudo obtener ecs_service_name de Terraform (Staging)."
+            exit 1
+          fi
+
+          echo "ECS SERVICE NAME Staging: $ECS_SERVICE_NAME"
+          echo "ecs_service_name=${ECS_SERVICE_NAME}" >> $GITHUB_OUTPUT
+
+          ECS_SERVICE_ARN=$(terraform output -raw ecs_service_arn)
+
+          if [ -z "$ECS_SERVICE_ARN" ]; then
+            echo "Error: No se pudo obtener ecs_service_arn de Terraform (Staging)."
+            exit 1
+          fi
+
+          echo "ECS SERVICE ARN Staging: $ECS_SERVICE_ARN"
+          echo "ecs_service_arn=${ECS_SERVICE_ARN}" >> $GITHUB_OUTPUT
+
+      # 8. Force new ECS deployment and wait for stability
+      - name: Force New Deployment ECS Service Staging for Frontend
+        run: |
+          echo "Forcing new deployment (Frontend) for Staging service..."
+          aws ecs update-service \
+            --cluster ${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }} \
+            --service ${{ steps.get_tf_frontend_outputs.outputs.ecs_service_name }} \
+            --force-new-deployment \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          # Esperar a que el despliegue se estabilice
+          echo "Waiting for Staging service deployment to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }} \
+            --services ${{ steps.get_tf_frontend_outputs.outputs.ecs_service_name }} \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "Staging service deployment stable for frontend."
+
+  acceptance-test-staging:
+    runs-on: ubuntu-latest
+    needs: [deploy-base-tf-staging, deploy-backend-tf-staging, deploy-frontend-tf-staging]
+    if: |
+      always() && 
+      github.event.workflow_run.conclusion == 'success' && 
+      needs.deploy-frontend-tf-staging.result == 'success'
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Install Chrome (required for Selenium)
+      - name: Install Chrome
+        run: |
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          sudo apt-get install -y google-chrome-stable
+
+      # 3. Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 4. Install test dependencies
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r src/tests/requirements.txt  # Incluye selenium, pytest
+
+      # 5. Run acceptance tests against staging
+      - name: Run Acceptance Tests against Staging
+        env:
+          APP_BASE_URL: ${{ needs.deploy-base-tf-staging.outputs.alb_url_staging }}
+        run: |
+          echo "Running acceptance tests against: $APP_BASE_URL"
+          sleep 45
+          pytest src/tests/acceptance/test_acceptance.py
+
+  security-test-staging:
+    runs-on: ubuntu-latest
+    needs: [deploy-base-tf-staging, acceptance-test-staging]
+    if: |
+      always() &&
+      github.event.workflow_run.conclusion == 'success' &&
+      needs.acceptance-test-staging.result == 'success'
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. OWASP ZAP full scan against staging ALB
+      # Escanea vulnerabilidades OWASP Top 10: XSS, SQL injection, CSRF, etc.
+      - name: OWASP ZAP Full Scan
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: ${{ needs.deploy-base-tf-staging.outputs.alb_url_staging }}
+          fail_action: true
+          allow_issue_writing: false
+
+      # 3. Upload ZAP report as artifact
+      - name: Upload ZAP Security Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-security-report
+          path: report_html.html
+
+
+  deploy-base-tf-prod:
+    runs-on: ubuntu-latest
+    needs: security-test-staging
+    if: github.event.workflow_run.conclusion == 'success'
+    defaults:
+      run:
+        working-directory: src/base/infra
+    outputs:
+      alb_url_prod: ${{ steps.get_tf_base_outputs.outputs.alb_url }}
+      ecs_cluster_name_prod: ${{ steps.get_tf_base_outputs.outputs.ecs_cluster_name }}
+      ecs_cluster_arn_prod: ${{ steps.get_tf_base_outputs.outputs.ecs_cluster_arn }}
+      ecs_backend_sg_id_prod: ${{ steps.get_tf_base_outputs.outputs.ecs_backend_sg_id }}
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.TF_REGION_NAME }}
+
+      # 3. Ensure Terraform state bucket exists
+      - name: Ensure Terraform State Bucket
+        run: |
+          if [ -z "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" ]; then
+            echo "Error: Debes definir la variable del repositorio TF_STATE_BUCKET."
+            exit 1
+          fi
+
+          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" 2>/dev/null; then
+            echo "El bucket de estado ya existe."
+
+          else
+            echo "Creando bucket de estado ${{ vars.TF_STATE_BUCKET_PRODUCTION }}..."
+            aws s3api create-bucket --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" --region "${{ vars.TF_REGION_NAME }}"
+          fi
+
+          aws s3api put-bucket-versioning \
+            --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" \
+            --versioning-configuration Status=Enabled
+
+      # 4. Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+          terraform_wrapper: false
+
+      # 5. Init Terraform with remote S3 backend
+      - name: Terraform Init (prod)
+        run: |
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET_PRODUCTION }}" \
+            -backend-config="key=prod/base/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_REGION_NAME }}"
+
+      # 6. Apply Terraform (Production)
+      - name: Terraform Apply (prod)
+        env:
+          TF_VAR_environment_name: production
+          TF_VAR_lab_role_arn: ${{ vars.LAB_ROLE_ARN }}
+          TF_VAR_vpc_id: ${{ vars.VPC_ID }}
+        run: |
+          # Convertir "subnet-xxx,subnet-yyy" en ["subnet-xxx","subnet-yyy"] para Terraform
+          SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
+            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
+
+          terraform apply -auto-approve \
+            -var="subnet_ids=${SUBNET_LIST}"
+
+      # 7. Export Terraform outputs
+      - name: Get Terraform Base Outputs (prod)
+        id: get_tf_base_outputs
+        run: |
+          ALB_URL=$(terraform output -raw alb_url)
+
+          if [ -z "$ALB_URL" ]; then
+            echo "Error: No se pudo obtener alb_url de Terraform (prod)."
+            exit 1
+          fi
+
+          echo "ALB URL prod: $ALB_URL"
+          echo "alb_url=${ALB_URL}" >> $GITHUB_OUTPUT
+
+          ECS_CLUSTER_NAME=$(terraform output -raw ecs_cluster_name)
+
+          if [ -z "$ECS_CLUSTER_NAME" ]; then
+            echo "Error: No se pudo obtener ecs_cluster_name de Terraform (prod)"
+            exit 1
+          fi
+
+          echo "ECS CLUSTER NAME prod: $ECS_CLUSTER_NAME"
+          echo "ecs_cluster_name=${ECS_CLUSTER_NAME}" >> $GITHUB_OUTPUT
+
+          ECS_CLUSTER_ARN=$(terraform output -raw ecs_cluster_arn)
+
+          if [ -z "$ECS_CLUSTER_ARN" ]; then
+            echo "Error: No se pudo obtener ecs_cluster_arn de Terraform (prod)"
+            exit 1
+          fi
+
+          echo "ECS CLUSTER ARN prod: $ECS_CLUSTER_ARN"
+          echo "ecs_cluster_arn=${ECS_CLUSTER_ARN}" >> $GITHUB_OUTPUT
+
+          ECS_BACKEND_SG_ID=$(terraform output -raw ecs_backend_sg_id)
+
+          if [ -z "$ECS_BACKEND_SG_ID" ]; then
+            echo "Error: No se pudo obtener ecs_backend_sg_id de Terraform (prod)"
+            exit 1
+          fi
+
+          echo "ECS CLUSTER ARN prod: $ECS_BACKEND_SG_ID"
+          echo "ecs_backend_sg_id=${ECS_BACKEND_SG_ID}" >> $GITHUB_OUTPUT
+
+
+  deploy-database-tf-prod:
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.name == 'CI pipeline for database' &&
+      needs.deploy-base-tf-prod.result == 'success'
+    needs: deploy-base-tf-prod
+    defaults:
+      run:
+        working-directory: src/database/infra
+    outputs:
+      db_endpoint_prod: ${{ steps.get_tf_database_outputs.outputs.db_endpoint }}
+      db_name_prod: ${{ steps.get_tf_database_outputs.outputs.db_name }}
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.TF_REGION_NAME }}
+
+      # 3. Ensure Terraform state bucket exists
+      - name: Ensure Terraform State Bucket
+        run: |
+          if [ -z "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" ]; then
+            echo "Error: Debes definir la variable del repositorio TF_STATE_BUCKET."
+            exit 1
+          fi
+
+          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" 2>/dev/null; then
+            echo "El bucket de estado ya existe."
+
+          else
+            echo "Creando bucket de estado ${{ vars.TF_STATE_BUCKET_PRODUCTION }}..."
+            aws s3api create-bucket --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" --region "${{ vars.TF_REGION_NAME }}"
+          fi
+
+          aws s3api put-bucket-versioning \
+            --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" \
+            --versioning-configuration Status=Enabled
+
+      # 4. Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+          terraform_wrapper: false
+
+      # 5. Init Terraform with remote S3 backend
+      - name: Terraform Init (prod)
+        run: |
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET_PRODUCTION }}" \
+            -backend-config="key=prod/database/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_REGION_NAME }}"
+
+      # 6. Apply Terraform (Production)
+      - name: Terraform Apply (prod)
+        env:
+          TF_VAR_environment_name: production
+          TF_VAR_lab_role_arn: ${{ vars.LAB_ROLE_ARN }}
+          TF_VAR_vpc_id: ${{ vars.VPC_ID }}
+          TF_VAR_db_username: ${{ secrets.DB_USERNAME }}
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_backend_ecs_sg_id: ${{ needs.deploy-base-tf-prod.outputs.ecs_backend_sg_id_prod }}
+        run: |
+          # Convertir "subnet-xxx,subnet-yyy" en ["subnet-xxx","subnet-yyy"] para Terraform
+          SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
+            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
+
+          terraform apply -auto-approve \
+            -var="subnet_ids=${SUBNET_LIST}"
+
+      # 7. Export Terraform outputs
+      - name: Get Terraform Database Outputs (prod)
+        id: get_tf_database_outputs
+        run: |
+          DB_ENDPOINT=$(terraform output -raw db_endpoint)
+
+          if [ -z "$DB_ENDPOINT" ]; then
+            echo "Error: No se pudo obtener db_endpoint de Terraform (prod)."
+            exit 1
+          fi
+
+          echo "DB ENDPOINT prod: $DB_ENDPOINT"
+          echo "db_endpoint=${DB_ENDPOINT}" >> $GITHUB_OUTPUT
+
+          DB_NAME=$(terraform output -raw db_name)
+
+          if [ -z "$DB_NAME" ]; then
+            echo "Error: No se pudo obtener db_name de Terraform (prod)."
+            exit 1
+          fi
+
+          echo "DB NAME prod: $DB_NAME"
+          echo "db_name=${DB_NAME}" >> $GITHUB_OUTPUT
+
+
+  deploy-backend-tf-prod:
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.name == 'CI pipeline for backend' &&
+      needs.deploy-base-tf-prod.result == 'success'
+    needs: [deploy-base-tf-prod, deploy-database-tf-prod]
+    defaults:
+      run:
+        working-directory: src/backend/infra
+    outputs:
+      ecs_service_name_prod: ${{ steps.get_tf_backend_outputs.outputs.ecs_service_name }}
+      ecs_service_arn_prod: ${{ steps.get_tf_backend_outputs.outputs.ecs_service_arn }}
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.TF_REGION_NAME }}
+
+      # 3. Ensure Terraform state bucket exists
+      - name: Ensure Terraform State Bucket
+        run: |
+          if [ -z "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" ]; then
+            echo "Error: Debes definir la variable del repositorio TF_STATE_BUCKET."
+            exit 1
+          fi
+
+          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" 2>/dev/null; then
+            echo "El bucket de estado ya existe."
+
+          else
+            echo "Creando bucket de estado ${{ vars.TF_STATE_BUCKET_PRODUCTION }}..."
+            aws s3api create-bucket --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" --region "${{ vars.TF_REGION_NAME }}"
+          fi
+
+          aws s3api put-bucket-versioning \
+            --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" \
+            --versioning-configuration Status=Enabled
+
+      # 4. Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+          terraform_wrapper: false
+
+      # 5. Init Terraform with remote S3 backend
+      - name: Terraform Init (prod)
+        run: |
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET_PRODUCTION }}" \
+            -backend-config="key=prod/backend/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_REGION_NAME }}"
+
+      # 6. Apply Terraform (Production)
+      - name: Terraform Apply (prod)
+        env:
+          TF_VAR_environment_name: production
+          TF_VAR_lab_role_arn: ${{ vars.LAB_ROLE_ARN }}
+          TF_VAR_vpc_id: ${{ vars.VPC_ID }}
+          TF_VAR_cors_origins: ${{ vars.CORS_ORIGINS_PRODUCTION }}
+          TF_VAR_docker_image_uri: "${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}-backend:${{ github.event.workflow_run.head_sha }}"
+        run: |
+          # Convertir "subnet-xxx,subnet-yyy" en ["subnet-xxx","subnet-yyy"] para Terraform
+          SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
+            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
+
+          # Construir DATABASE_URL con outputs de database y secretos
+          DATABASE_URL="postgresql://${{ secrets.DB_USERNAME }}:${{ secrets.DB_PASSWORD }}@${{ needs.deploy-database-tf-prod.outputs.db_endpoint_prod }}/${{ needs.deploy-database-tf-prod.outputs.db_name_prod }}"
+
+          # Convertir CORS_ORIGINS en lista HCL
+          CORS_LIST=$(echo "${{ vars.CORS_ORIGINS_PRODUCTION }}" | \
+            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
+
+          terraform apply -auto-approve \
+            -var="subnet_ids=${SUBNET_LIST}" \
+            -var="database_url=${DATABASE_URL}" \
+            -var="cors_origins=${CORS_LIST}"
+
+      # 7. Export Terraform outputs
+      - name: Get Terraform Backend Outputs (prod)
+        id: get_tf_backend_outputs
+        run: |
+          ECS_SERVICE_NAME=$(terraform output -raw ecs_service_name)
+
+          if [ -z "$ECS_SERVICE_NAME" ]; then
+            echo "Error: No se pudo obtener ecs_service_name de Terraform (prod)."
+            exit 1
+          fi
+
+          echo "ECS SERVICE NAME prod: $ECS_SERVICE_NAME"
+          echo "ecs_service_name=${ECS_SERVICE_NAME}" >> $GITHUB_OUTPUT
+
+          ECS_SERVICE_ARN=$(terraform output -raw ecs_service_arn)
+
+          if [ -z "$ECS_SERVICE_ARN" ]; then
+            echo "Error: No se pudo obtener ecs_service_arn de Terraform (prod)."
+            exit 1
+          fi
+
+          echo "ECS SERVICE ARN prod: $ECS_SERVICE_ARN"
+          echo "ecs_service_arn=${ECS_SERVICE_ARN}" >> $GITHUB_OUTPUT
+
+      # 8. Force new ECS deployment and wait for stability
+      - name: Force New Deployment ECS Service prod for Backend
+        run: |
+          echo "Forcing new deployment (Backend) for prod service..."
+          aws ecs update-service \
+            --cluster ${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }} \
+            --service ${{ steps.get_tf_backend_outputs.outputs.ecs_service_name }} \
+            --force-new-deployment \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          # Esperar a que el despliegue se estabilice
+          echo "Waiting for prod service deployment to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }}\
+            --services ${{ steps.get_tf_backend_outputs.outputs.ecs_service_name }} \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "prod service deployment stable."
+
+
+  deploy-frontend-tf-prod:
+    runs-on: ubuntu-latest
+    if: |
+      always() &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.name == 'CI pipeline for frontend' &&
+      needs.deploy-base-tf-prod.result == 'success'
+    needs: [deploy-base-tf-prod, deploy-database-tf-prod, deploy-backend-tf-prod]
+    defaults:
+      run:
+        working-directory: src/frontend/infra
+    outputs:
+      ecs_service_name_prod: ${{ steps.get_tf_frontend_outputs.outputs.ecs_service_name }}
+      ecs_service_arn_prod: ${{ steps.get_tf_frontend_outputs.outputs.ecs_service_arn }}
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.TF_REGION_NAME }}
+
+      # 3. Ensure Terraform state bucket exists
+      - name: Ensure Terraform State Bucket
+        run: |
+          if [ -z "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" ]; then
+            echo "Error: Debes definir la variable del repositorio TF_STATE_BUCKET."
+            exit 1
+          fi
+
+          if aws s3api head-bucket --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" 2>/dev/null; then
+            echo "El bucket de estado ya existe."
+
+          else
+            echo "Creando bucket de estado ${{ vars.TF_STATE_BUCKET_PRODUCTION }}..."
+            aws s3api create-bucket --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" --region "${{ vars.TF_REGION_NAME }}"
+          fi
+
+          aws s3api put-bucket-versioning \
+            --bucket "${{ vars.TF_STATE_BUCKET_PRODUCTION }}" \
+            --versioning-configuration Status=Enabled
+
+      # 4. Set up Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.6"
+          terraform_wrapper: false
+
+      # 5. Init Terraform with remote S3 backend
+      - name: Terraform Init (prod)
+        run: |
+          terraform init -reconfigure \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET_PRODUCTION }}" \
+            -backend-config="key=prod/frontend/terraform.tfstate" \
+            -backend-config="region=${{ vars.TF_REGION_NAME }}"
+
+      # 6. Apply Terraform (Production)
+      - name: Terraform Apply (prod)
+        env:
+          TF_VAR_environment_name: production
+          TF_VAR_lab_role_arn: ${{ vars.LAB_ROLE_ARN }}
+          TF_VAR_vpc_id: ${{ vars.VPC_ID }}
+          TF_VAR_docker_image_uri: "${{ vars.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}-frontend:${{ github.event.workflow_run.head_sha }}"
+        run: |
+          # Convertir "subnet-xxx,subnet-yyy" en ["subnet-xxx","subnet-yyy"] para Terraform
+          SUBNET_LIST=$(echo "${{ vars.SUBNET_IDS }}" | \
+            awk -F',' '{printf "["; for(i=1;i<=NF;i++){printf "\"%s\"%s",$i,(i<NF?",":"")}; printf "]"}')
+
+          terraform apply -auto-approve \
+            -var="subnet_ids=${SUBNET_LIST}"
+
+      # 7. Export Terraform outputs
+      - name: Get Terraform Frontend Outputs (prod)
+        id: get_tf_frontend_outputs
+        run: |
+          ECS_SERVICE_NAME=$(terraform output -raw ecs_service_name)
+
+          if [ -z "$ECS_SERVICE_NAME" ]; then
+            echo "Error: No se pudo obtener ecs_service_name de Terraform (prod)."
+            exit 1
+          fi
+
+          echo "ECS SERVICE NAME prod: $ECS_SERVICE_NAME"
+          echo "ecs_service_name=${ECS_SERVICE_NAME}" >> $GITHUB_OUTPUT
+
+          ECS_SERVICE_ARN=$(terraform output -raw ecs_service_arn)
+
+          if [ -z "$ECS_SERVICE_ARN" ]; then
+            echo "Error: No se pudo obtener ecs_service_arn de Terraform (prod)."
+            exit 1
+          fi
+
+          echo "ECS SERVICE ARN prod: $ECS_SERVICE_ARN"
+          echo "ecs_service_arn=${ECS_SERVICE_ARN}" >> $GITHUB_OUTPUT
+
+      # 8. Force new ECS deployment and wait for stability
+      - name: Force New Deployment ECS Service prod for Frontend
+        run: |
+          echo "Forcing new deployment (Frontend) for prod service..."
+          aws ecs update-service \
+            --cluster ${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }} \
+            --service ${{ steps.get_tf_frontend_outputs.outputs.ecs_service_name }} \
+            --force-new-deployment \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          # Esperar a que el despliegue se estabilice
+          echo "Waiting for prod service deployment to stabilize..."
+          aws ecs wait services-stable \
+            --cluster ${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }} \
+            --services ${{ steps.get_tf_frontend_outputs.outputs.ecs_service_name }} \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "prod service deployment stable for frontend."
+
+
+  smoke-test-prod:
+    needs: [deploy-frontend-tf-prod]
+    runs-on: ubuntu-latest
+    if: |
+      always() && 
+      github.event.workflow_run.conclusion == 'success' && 
+      needs.deploy-frontend-tf-prod.result == 'success'
+
+    steps:
+      # 1. Clone repo
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 3. Install test dependencies
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r src/tests/requirements.txt
+
+      # 4. Run smoke tests against production
+      - name: Run Smoke Tests against Production
+        env:
+          APP_BASE_URL: ${{ needs.deploy-base-tf-prod.outputs.alb_url_prod }}
+        run: |
+          echo "Running smoke tests against: $APP_BASE_URL"
+          sleep 45
+          pytest src/tests/smoke/test_smoke.py
