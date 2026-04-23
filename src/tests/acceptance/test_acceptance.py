@@ -70,6 +70,9 @@ def test_crear_grupo_aparece_en_listado(browser):
     """Crear un grupo → aparece en la lista de grupos."""
     crear_grupo(browser, "Viaje Selenium", ["Ana", "Bob"])
 
+    # Volver al listado de grupos
+    browser.get(BASE_URL)
+
     # Verificar que el grupo aparece en el listado
     wait_for(browser, By.ID, "group-list")
     grupos = browser.find_elements(By.CSS_SELECTOR, ".group-card")
