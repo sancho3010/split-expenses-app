@@ -9,6 +9,10 @@ on:
 
   workflow_dispatch:  # Permite ejecución manual desde la UI de Github Actions
 
+# Evitar race conditions: solo un CD a la vez por entorno
+concurrency:
+  group: cd-deploy
+  cancel-in-progress: false
 
 # Definición de los trabajos (Jobs)
 jobs:

@@ -40,3 +40,8 @@ variable "db_password" {
   type        = string
   sensitive   = true
 }
+
+variable "backend_ecs_sg_id" {
+  description = "ID del Security Group del ECS backend, para restringir acceso al RDS."
+  type        = string
+}
