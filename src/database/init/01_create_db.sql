@@ -1,5 +1,6 @@
 -- Script de inicialización de la base de datos.
 -- Se ejecuta automáticamente la primera vez que se crea el contenedor.
+-- CI/CD pipeline validated
 
 -- La DB "splitwise" ya se crea via POSTGRES_DB env var.
 -- Aquí van extensiones o configuraciones adicionales si se necesitan.
