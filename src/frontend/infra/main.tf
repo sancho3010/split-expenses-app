@@ -1,4 +1,4 @@
-# Infra: Main Definition for Frontend in AWS (Cloud)
+# Infra: Main Definition for Frontend in AWS (Cloud).
 
 terraform {
   required_version = ">= 1.6.0"
