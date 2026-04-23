@@ -18,8 +18,39 @@ concurrency:
 # Definición de los trabajos (Jobs)
 jobs:
 
+  detect-changes:
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      database: ${{ steps.filter.outputs.database }}
+      infra_base: ${{ steps.filter.outputs.infra_base }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Filter paths
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'src/backend/**'
+            frontend:
+              - 'src/frontend/**'
+            database:
+              - 'src/database/**'
+              - 'src/backend/alembic/**'
+            infra_base:
+              - 'src/base/**'
+
   deploy-base-tf-staging:
     runs-on: ubuntu-latest
+    needs: detect-changes
     if: github.event.workflow_run.conclusion == 'success'
     defaults:
       run:
@@ -143,8 +174,9 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      needs.deploy-base-tf-staging.result == 'success'
-    needs: deploy-base-tf-staging
+      needs.deploy-base-tf-staging.result == 'success' &&
+      needs.detect-changes.outputs.database == 'true'
+    needs: [detect-changes, deploy-base-tf-staging]
     defaults:
       run:
         working-directory: src/database/infra
@@ -248,8 +280,10 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      needs.deploy-base-tf-staging.result == 'success'
-    needs: [deploy-base-tf-staging, deploy-database-tf-staging]
+      needs.deploy-base-tf-staging.result == 'success' &&
+      (needs.deploy-database-tf-staging.result == 'success' || needs.deploy-database-tf-staging.result == 'skipped') &&
+      needs.detect-changes.outputs.backend == 'true'
+    needs: [detect-changes, deploy-base-tf-staging, deploy-database-tf-staging]
     defaults:
       run:
         working-directory: src/backend/infra
@@ -356,9 +390,6 @@ jobs:
           echo "ecs_service_arn=${ECS_SERVICE_ARN}" >> $GITHUB_OUTPUT
 
 
-  # ---------------------------------------------------------------
-  # Job de Actualización Servicio Backend Staging (Forzar despliegue)
-  # ---------------------------------------------------------------
   update-backend-staging:
     needs: [deploy-base-tf-staging, deploy-backend-tf-staging]
     runs-on: ubuntu-latest
@@ -378,17 +409,20 @@ jobs:
 
       - name: Force New Deployment ECS Service Staging for Backend
         run: |
+          CLUSTER="${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }}"
+          SERVICE="${{ needs.deploy-backend-tf-staging.outputs.ecs_service_name_staging }}"
+
           echo "Forcing new deployment (Backend) for Staging service..."
           aws ecs update-service \
-            --cluster ${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }} \
-            --service ${{ needs.deploy-backend-tf-staging.outputs.ecs_service_name_staging }} \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
             --force-new-deployment \
             --region "${{ vars.TF_REGION_NAME }}"
 
           echo "Waiting for Staging service deployment to stabilize..."
           aws ecs wait services-stable \
-            --cluster ${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }} \
-            --services ${{ needs.deploy-backend-tf-staging.outputs.ecs_service_name_staging }} \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
             --region "${{ vars.TF_REGION_NAME }}"
 
           echo "Staging backend service deployment stable."
@@ -398,8 +432,10 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      needs.deploy-base-tf-staging.result == 'success'
-    needs: [deploy-base-tf-staging, deploy-database-tf-staging, deploy-backend-tf-staging]
+      needs.deploy-base-tf-staging.result == 'success' &&
+      (needs.deploy-backend-tf-staging.result == 'success' || needs.deploy-backend-tf-staging.result == 'skipped') &&
+      needs.detect-changes.outputs.frontend == 'true'
+    needs: [detect-changes, deploy-base-tf-staging, deploy-database-tf-staging, deploy-backend-tf-staging]
     defaults:
       run:
         working-directory: src/frontend/infra
@@ -495,10 +531,6 @@ jobs:
           echo "ECS SERVICE ARN Staging: $ECS_SERVICE_ARN"
           echo "ecs_service_arn=${ECS_SERVICE_ARN}" >> $GITHUB_OUTPUT
 
-
-  # ---------------------------------------------------------------
-  # Job de Actualización Servicio Frontend Staging (Forzar despliegue)
-  # ---------------------------------------------------------------
   update-frontend-staging:
     needs: [deploy-base-tf-staging, deploy-frontend-tf-staging]
     runs-on: ubuntu-latest
@@ -518,29 +550,31 @@ jobs:
 
       - name: Force New Deployment ECS Service Staging for Frontend
         run: |
+          CLUSTER="${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }}"
+          SERVICE="${{ needs.deploy-frontend-tf-staging.outputs.ecs_service_name_staging }}"
+
           echo "Forcing new deployment (Frontend) for Staging service..."
           aws ecs update-service \
-            --cluster ${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }} \
-            --service ${{ needs.deploy-frontend-tf-staging.outputs.ecs_service_name_staging }} \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
             --force-new-deployment \
             --region "${{ vars.TF_REGION_NAME }}"
 
           echo "Waiting for Staging service deployment to stabilize..."
           aws ecs wait services-stable \
-            --cluster ${{ needs.deploy-base-tf-staging.outputs.ecs_cluster_name_staging }} \
-            --services ${{ needs.deploy-frontend-tf-staging.outputs.ecs_service_name_staging }} \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
             --region "${{ vars.TF_REGION_NAME }}"
 
           echo "Staging frontend service deployment stable."
 
   acceptance-test-staging:
     runs-on: ubuntu-latest
-    needs: [deploy-base-tf-staging, update-backend-staging, update-frontend-staging]
+    needs: [deploy-base-tf-staging, deploy-database-tf-staging, update-backend-staging, update-frontend-staging]
     if: |
       always() && 
       github.event.workflow_run.conclusion == 'success' && 
-      needs.update-backend-staging.result == 'success' &&
-      needs.update-frontend-staging.result == 'success'
+      needs.deploy-base-tf-staging.result == 'success'
 
     steps:
       # 1. Clone repo
@@ -624,7 +658,7 @@ jobs:
 
   deploy-base-tf-prod:
     runs-on: ubuntu-latest
-    needs: security-test-staging
+    needs: [detect-changes, security-test-staging]
     if: github.event.workflow_run.conclusion == 'success'
     defaults:
       run:
@@ -748,8 +782,9 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      needs.deploy-base-tf-prod.result == 'success'
-    needs: deploy-base-tf-prod
+      needs.deploy-base-tf-prod.result == 'success' &&
+      needs.detect-changes.outputs.database == 'true'
+    needs: [detect-changes, deploy-base-tf-prod]
     defaults:
       run:
         working-directory: src/database/infra
@@ -853,8 +888,10 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      needs.deploy-base-tf-prod.result == 'success'
-    needs: [deploy-base-tf-prod, deploy-database-tf-prod]
+      needs.deploy-base-tf-prod.result == 'success' &&
+      (needs.deploy-database-tf-prod.result == 'success' || needs.deploy-database-tf-prod.result == 'skipped') &&
+      needs.detect-changes.outputs.backend == 'true'
+    needs: [detect-changes, deploy-base-tf-prod, deploy-database-tf-prod]
     defaults:
       run:
         working-directory: src/backend/infra
@@ -983,17 +1020,20 @@ jobs:
 
       - name: Force New Deployment ECS Service prod for Backend
         run: |
+          CLUSTER="${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }}"
+          SERVICE="${{ needs.deploy-backend-tf-prod.outputs.ecs_service_name_prod }}"
+
           echo "Forcing new deployment (Backend) for prod service..."
           aws ecs update-service \
-            --cluster ${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }} \
-            --service ${{ needs.deploy-backend-tf-prod.outputs.ecs_service_name_prod }} \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
             --force-new-deployment \
             --region "${{ vars.TF_REGION_NAME }}"
 
           echo "Waiting for prod service deployment to stabilize..."
           aws ecs wait services-stable \
-            --cluster ${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }} \
-            --services ${{ needs.deploy-backend-tf-prod.outputs.ecs_service_name_prod }} \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
             --region "${{ vars.TF_REGION_NAME }}"
 
           echo "prod backend service deployment stable."
@@ -1004,8 +1044,10 @@ jobs:
     if: |
       always() &&
       github.event.workflow_run.conclusion == 'success' &&
-      needs.deploy-base-tf-prod.result == 'success'
-    needs: [deploy-base-tf-prod, deploy-database-tf-prod, deploy-backend-tf-prod]
+      needs.deploy-base-tf-prod.result == 'success' &&
+      (needs.deploy-backend-tf-prod.result == 'success' || needs.deploy-backend-tf-prod.result == 'skipped') &&
+      needs.detect-changes.outputs.frontend == 'true'
+    needs: [detect-changes, deploy-base-tf-prod, deploy-database-tf-prod, deploy-backend-tf-prod]
     defaults:
       run:
         working-directory: src/frontend/infra
@@ -1124,30 +1166,32 @@ jobs:
 
       - name: Force New Deployment ECS Service prod for Frontend
         run: |
+          CLUSTER="${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }}"
+          SERVICE="${{ needs.deploy-frontend-tf-prod.outputs.ecs_service_name_prod }}"
+
           echo "Forcing new deployment (Frontend) for prod service..."
           aws ecs update-service \
-            --cluster ${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }} \
-            --service ${{ needs.deploy-frontend-tf-prod.outputs.ecs_service_name_prod }} \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
             --force-new-deployment \
             --region "${{ vars.TF_REGION_NAME }}"
 
           echo "Waiting for prod service deployment to stabilize..."
           aws ecs wait services-stable \
-            --cluster ${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }} \
-            --services ${{ needs.deploy-frontend-tf-prod.outputs.ecs_service_name_prod }} \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
             --region "${{ vars.TF_REGION_NAME }}"
 
           echo "prod frontend service deployment stable."
 
 
   smoke-test-prod:
-    needs: [deploy-base-tf-prod, update-backend-prod, update-frontend-prod]
+    needs: [deploy-base-tf-prod, deploy-database-tf-prod, update-backend-prod, update-frontend-prod]
     runs-on: ubuntu-latest
     if: |
       always() && 
       github.event.workflow_run.conclusion == 'success' && 
-      needs.update-backend-prod.result == 'success' &&
-      needs.update-frontend-prod.result == 'success'
+      needs.deploy-base-tf-prod.result == 'success'
 
     steps:
       # 1. Clone repo

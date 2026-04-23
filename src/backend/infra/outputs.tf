@@ -1,3 +1,5 @@
+# Infra: Output Definition
+
 output "ecs_service_name" {
   description = "Nombre del ECS Service del backend"
   value       = aws_ecs_service.main.name
