@@ -50,7 +50,21 @@ jobs:
       - name: Run Stylelint
         run: npx stylelint css/
 
-      # 7. Static analysis
+      # 7. Unit tests with coverage
+      - name: Run tests
+        run: npm test
+
+      # 8. Upload test reports
+      - name: Upload Test Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-test-reports
+          path: |
+            src/frontend/coverage/
+            src/frontend/ci_frontend_unit_report.html
+
+      # 9. Static analysis
       - name: SonarCloud Analysis
         uses: SonarSource/sonarqube-scan-action@v5.0.0
         with:

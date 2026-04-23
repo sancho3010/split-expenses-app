@@ -35,7 +35,7 @@ function formatDate(dateStr) {
 const groupEmojis = ["🏖️", "🍕", "🏠", "🎉", "✈️", "🎮", "🍻", "⚽", "🎵", "🚗"];
 function getGroupEmoji(name) {
     let hash = 0;
-    for (const ch of name) hash = Math.trunc((hash << 5) - hash + ch.codePointAt(0));
+    for (const ch of name) hash = ((hash << 5) - hash + ch.charCodeAt(0)) | 0;
     return groupEmojis[Math.abs(hash) % groupEmojis.length];
 }
 
@@ -55,7 +55,7 @@ function showGroupsView() {
     currentGroupId = null;
     groupsView.hidden = false;
     detailView.hidden = true;
-    globalThis.location.hash = "";
+    window.location.hash = "";
     loadGroups();
 }
 
@@ -63,7 +63,7 @@ function showDetailView(groupId) {
     currentGroupId = groupId;
     groupsView.hidden = true;
     detailView.hidden = false;
-    globalThis.location.hash = `#group/${groupId}`;
+    window.location.hash = `#group/${groupId}`;
     loadGroupDetail(groupId);
 }
 
@@ -211,20 +211,13 @@ function renderBalances(balances) {
     empty.hidden = true;
     container.innerHTML = balances.map((b) => {
         const val = Number(b.balance);
-        let cls;
-        if (val > 0) cls = "positive";
-        else if (val < 0) cls = "negative";
-        else cls = "zero";
-
+        const cls = val > 0 ? "positive" : val < 0 ? "negative" : "zero";
         let text;
         if (val > 0) text = `+${formatMoney(val)}`;
         else if (val < 0) text = `-${formatMoney(Math.abs(val))}`;
         else text = "✓ En paz";
 
-        let icon;
-        if (val > 0) icon = "🟢";
-        else if (val < 0) icon = "🔴";
-        else icon = "⚪";
+        const icon = val > 0 ? "🟢" : val < 0 ? "🔴" : "⚪";
 
         return `
             <div class="card balance-card ${cls}">
@@ -285,7 +278,7 @@ function renderMemberTags() {
 
     container.querySelectorAll(".member-tag-remove").forEach((btn) => {
         btn.addEventListener("click", () => {
-            membersList.splice(Number.parseInt(btn.dataset.index, 10), 1);
+            membersList.splice(parseInt(btn.dataset.index), 1);
             renderMemberTags();
         });
     });
@@ -343,7 +336,7 @@ $("#add-expense-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const data = {
         description: $("#expense-desc").value.trim(),
-        amount: Number.parseFloat($("#expense-amount").value),
+        amount: parseFloat($("#expense-amount").value),
         paid_by_id: $("#expense-paid-by").value,
     };
 
@@ -377,8 +370,8 @@ $$(".tab").forEach((tab) => {
 // --- Routing por hash ---
 
 function handleRoute() {
-    const hash = globalThis.location.hash;
-    const match = /^#group\/(.+)$/.exec(hash);
+    const hash = window.location.hash;
+    const match = hash.match(/^#group\/(.+)$/);
     if (match) {
         showDetailView(match[1]);
     } else {
@@ -386,7 +379,7 @@ function handleRoute() {
     }
 }
 
-globalThis.addEventListener("hashchange", handleRoute);
+window.addEventListener("hashchange", handleRoute);
 
 // --- Init ---
 handleRoute();

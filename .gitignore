@@ -24,6 +24,10 @@ coverage.xml
 report.html
 acceptance_coverage.xml
 
+# Jest / coverage (frontend)
+coverage/
+ci_frontend_unit_report.html
+
 # Environment variables
 .env
 .env.*
