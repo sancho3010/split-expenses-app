@@ -1,0 +1,65 @@
+name: Panic Button | Stop Services
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Entorno a detener'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+      component:
+        description: 'Componente a detener'
+        required: true
+        type: choice
+        options:
+          - backend
+          - frontend
+          - ambos
+
+      confirm:
+        description: 'Escribe CONFIRMAR para proceder'
+        required: true
+
+jobs:
+  panic:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'CONFIRMAR'
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.TF_REGION_NAME }}
+
+      - name: Stop backend service
+        if: github.event.inputs.component == 'backend' || github.event.inputs.component == 'ambos'
+        run: |
+          echo "Stopping backend in ${{ github.event.inputs.environment }}..."
+          aws ecs update-service \
+            --cluster "splitwise-lite-${{ github.event.inputs.environment }}-ecs-cluster" \
+            --service "splitwise-lite-${{ github.event.inputs.environment }}-backend-service" \
+            --desired-count 0 \
+            --region "${{ vars.TF_REGION_NAME }}"
+          echo "Backend stopped."
+
+      - name: Stop frontend service
+        if: github.event.inputs.component == 'frontend' || github.event.inputs.component == 'ambos'
+        run: |
+          echo "Stopping frontend in ${{ github.event.inputs.environment }}..."
+          aws ecs update-service \
+            --cluster "splitwise-lite-${{ github.event.inputs.environment }}-ecs-cluster" \
+            --service "splitwise-lite-${{ github.event.inputs.environment }}-frontend-service" \
+            --desired-count 0 \
+            --region "${{ vars.TF_REGION_NAME }}"
+          echo "Frontend stopped."
+
+      - name: Confirm services stopped
+        run: |
+          echo "Services stopped in ${{ github.event.inputs.environment }} (${{ github.event.inputs.component }})."
+          echo "To restore, re-run the CD pipeline or manually set desired-count back to 1."
