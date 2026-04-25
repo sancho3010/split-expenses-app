@@ -15,6 +15,7 @@ specs/
 .venv/
 venv/
 env/
+monitoring/
 
 # pytest / coverage
 .pytest_cache/

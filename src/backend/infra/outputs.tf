@@ -1,4 +1,4 @@
-# Infra: Output Definition
+# Infra: Output Definition for Backend
 
 output "ecs_service_name" {
   description = "Nombre del ECS Service del backend"
