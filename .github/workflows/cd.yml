@@ -1345,13 +1345,14 @@ jobs:
 
           # 3. Re-registrar la config anterior como nueva revisión ACTIVE
           echo "Re-registering previous config as new ACTIVE revision..."
-          NEW_TD_ARN=$(aws ecs describe-task-definition \
+          aws ecs describe-task-definition \
             --task-definition "$PREVIOUS_TD_ARN" \
             --query "taskDefinition.{family:family,containerDefinitions:containerDefinitions,taskRoleArn:taskRoleArn,executionRoleArn:executionRoleArn,networkMode:networkMode,requiresCompatibilities:requiresCompatibilities,cpu:cpu,memory:memory}" \
             --output json \
-            --region "${{ vars.TF_REGION_NAME }}" | \
-          aws ecs register-task-definition \
-            --cli-input-json file:///dev/stdin \
+            --region "${{ vars.TF_REGION_NAME }}" > /tmp/td_rollback_backend.json
+
+          NEW_TD_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/td_rollback_backend.json \
             --query "taskDefinition.taskDefinitionArn" \
             --output text \
             --region "${{ vars.TF_REGION_NAME }}")
@@ -1415,13 +1416,14 @@ jobs:
 
           # 3. Re-registrar como nueva revisión ACTIVE
           echo "Re-registering previous config as new ACTIVE revision..."
-          NEW_TD_ARN=$(aws ecs describe-task-definition \
+          aws ecs describe-task-definition \
             --task-definition "$PREVIOUS_TD_ARN" \
             --query "taskDefinition.{family:family,containerDefinitions:containerDefinitions,taskRoleArn:taskRoleArn,executionRoleArn:executionRoleArn,networkMode:networkMode,requiresCompatibilities:requiresCompatibilities,cpu:cpu,memory:memory}" \
             --output json \
-            --region "${{ vars.TF_REGION_NAME }}" | \
-          aws ecs register-task-definition \
-            --cli-input-json file:///dev/stdin \
+            --region "${{ vars.TF_REGION_NAME }}" > /tmp/td_rollback_frontend.json
+
+          NEW_TD_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file:///tmp/td_rollback_frontend.json \
             --query "taskDefinition.taskDefinitionArn" \
             --output text \
             --region "${{ vars.TF_REGION_NAME }}")
