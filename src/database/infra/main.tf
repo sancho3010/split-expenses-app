@@ -34,6 +34,7 @@ locals {
 # -------------------- Security Group del RDS -----------------------
 # Solo acepta tráfico del ECS backend en el puerto 5432
 resource "aws_security_group" "rds_sg" {
+  #checkov:skip=CKV_AWS_382:Egress abierto requerido para conectividad de red del RDS
   name        = "${local.prefix}-${local.component}-sg"
   description = "Permite trafico al RDS solo desde el ECS backend"
   vpc_id      = var.vpc_id
@@ -47,6 +48,7 @@ resource "aws_security_group" "rds_sg" {
   }
 
   egress {
+    description = "Permite trafico de salida para actualizaciones y DNS"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -80,8 +82,20 @@ resource "aws_db_instance" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds_sg.id]
 
-  publicly_accessible = false  # No expuesto a internet
-  skip_final_snapshot = true   # Para facilitar destroy en entorno academico
+  publicly_accessible    = false  # No expuesto a internet
+  skip_final_snapshot    = true   # Para facilitar destroy en entorno academico
+  storage_encrypted      = true   # CKV_AWS_16: encriptación en reposo
+  auto_minor_version_upgrade = true   # CKV_AWS_226: upgrades automáticos
+  deletion_protection    = var.deletion_protection # CKV_AWS_293: protección contra borrado accidental
+  copy_tags_to_snapshot  = true   # CKV2_AWS_60: tags en snapshots
+
+  enabled_cloudwatch_logs_exports = ["postgresql", "upgrade"]  # CKV_AWS_129: logs habilitados
+
+  #checkov:skip=CKV_AWS_118:Enhanced monitoring requiere IAM role dedicado no disponible en AWS Academy
+  #checkov:skip=CKV_AWS_353:Performance Insights no soportado en db.t3.micro
+  #checkov:skip=CKV_AWS_161:IAM authentication requiere configuración IAM avanzada no disponible en AWS Academy
+  #checkov:skip=CKV_AWS_157:Multi-AZ duplica el costo, no viable en entorno académico
+  #checkov:skip=CKV2_AWS_30:Query logging requiere parameter group custom, fuera del alcance académico
 
   tags = local.common_tags
 }

@@ -46,3 +46,9 @@ variable "backend_ecs_sg_id" {
   description = "ID del Security Group del ECS backend, para restringir acceso al RDS."
   type        = string
 }
+
+variable "deletion_protection" {
+  description = "Protección contra borrado accidental del RDS. Desactivar antes de terraform destroy."
+  type        = bool
+  default     = true
+}

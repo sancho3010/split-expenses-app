@@ -32,12 +32,15 @@ locals {
 
 # -------------------- ECS Cluster compartido -----------------------
 resource "aws_ecs_cluster" "main" {
+  #checkov:skip=CKV_AWS_65:Container Insights genera costos adicionales, fuera del alcance académico
   name = "${local.prefix}-ecs-cluster"
   tags = local.common_tags
 }
 
 # -------------------- Security Group del ALB -----------------------
 resource "aws_security_group" "alb_sg" {
+  #checkov:skip=CKV_AWS_260:El ALB es público y debe aceptar HTTP en puerto 80 desde internet
+  #checkov:skip=CKV_AWS_382:Egress abierto requerido para que el ALB se comunique con los targets
   name        = "${local.prefix}-alb-sg"
   description = "Permite trafico HTTP al ALB"
   vpc_id      = var.vpc_id
@@ -51,6 +54,7 @@ resource "aws_security_group" "alb_sg" {
   }
 
   egress {
+    description = "Permite trafico de salida para conectividad de red"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
@@ -62,11 +66,17 @@ resource "aws_security_group" "alb_sg" {
 
 # -------------------- Application Load Balancer --------------------
 resource "aws_lb" "main" {
-  name               = "${local.prefix}-alb"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.alb_sg.id]
-  subnets            = var.subnet_ids
+  #checkov:skip=CKV_AWS_131:drop_invalid_header_fields ya está habilitado
+  #checkov:skip=CKV_AWS_150:Deletion protection deshabilitada para facilitar destroy en entorno académico
+  #checkov:skip=CKV_AWS_91:Access logging requiere bucket S3 dedicado, fuera del alcance académico
+  #checkov:skip=CKV2_AWS_20:HTTPS requiere certificado ACM, no disponible en AWS Academy
+  #checkov:skip=CKV2_AWS_28:WAF no disponible en AWS Academy
+  name                       = "${local.prefix}-alb"
+  internal                   = false
+  load_balancer_type         = "application"
+  security_groups            = [aws_security_group.alb_sg.id]
+  subnets                    = var.subnet_ids
+  drop_invalid_header_fields = true
 
   tags = local.common_tags
 }
@@ -74,6 +84,8 @@ resource "aws_lb" "main" {
 # -------------------- Listener HTTP --------------------------------
 # Regla por defecto: 404 — cada componente agrega sus propias reglas
 resource "aws_lb_listener" "http" {
+  #checkov:skip=CKV_AWS_2:HTTPS requiere certificado ACM, no disponible en AWS Academy
+  #checkov:skip=CKV_AWS_103:TLS requiere certificado ACM, no disponible en AWS Academy
   load_balancer_arn = aws_lb.main.arn
   port              = 80
   protocol          = "HTTP"
@@ -93,6 +105,8 @@ resource "aws_lb_listener" "http" {
 # database necesita este sg para restringir acceso al RDS,
 # pero database se despliega antes que backend.
 resource "aws_security_group" "ecs_backend_sg" {
+  #checkov:skip=CKV_AWS_382:Egress abierto requerido para que ECS backend descargue imagenes y se comunique con RDS
+  #checkov:skip=CKV2_AWS_5:Este SG se usa en backend/infra via data source, Checkov no detecta referencias cross-module
   name        = "${local.prefix}-backend-ecs-sg"
   description = "Permite trafico desde el ALB al servicio ECS backend"
   vpc_id      = var.vpc_id
@@ -106,6 +120,7 @@ resource "aws_security_group" "ecs_backend_sg" {
   }
 
   egress {
+    description = "Permite trafico de salida para conectividad de red"
     from_port   = 0
     to_port     = 0
     protocol    = "-1"
