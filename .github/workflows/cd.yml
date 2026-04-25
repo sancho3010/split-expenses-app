@@ -1347,16 +1347,7 @@ jobs:
           echo "Re-registering previous config as new ACTIVE revision..."
           NEW_TD_ARN=$(aws ecs describe-task-definition \
             --task-definition "$PREVIOUS_TD_ARN" \
-            --query "taskDefinition.{
-              family: family,
-              containerDefinitions: containerDefinitions,
-              taskRoleArn: taskRoleArn,
-              executionRoleArn: executionRoleArn,
-              networkMode: networkMode,
-              requiresCompatibilities: requiresCompatibilities,
-              cpu: cpu,
-              memory: memory
-            }" \
+            --query "taskDefinition.{family:family,containerDefinitions:containerDefinitions,taskRoleArn:taskRoleArn,executionRoleArn:executionRoleArn,networkMode:networkMode,requiresCompatibilities:requiresCompatibilities,cpu:cpu,memory:memory}" \
             --output json \
             --region "${{ vars.TF_REGION_NAME }}" | \
           aws ecs register-task-definition \
@@ -1426,16 +1417,7 @@ jobs:
           echo "Re-registering previous config as new ACTIVE revision..."
           NEW_TD_ARN=$(aws ecs describe-task-definition \
             --task-definition "$PREVIOUS_TD_ARN" \
-            --query "taskDefinition.{
-              family: family,
-              containerDefinitions: containerDefinitions,
-              taskRoleArn: taskRoleArn,
-              executionRoleArn: executionRoleArn,
-              networkMode: networkMode,
-              requiresCompatibilities: requiresCompatibilities,
-              cpu: cpu,
-              memory: memory
-            }" \
+            --query "taskDefinition.{family:family,containerDefinitions:containerDefinitions,taskRoleArn:taskRoleArn,executionRoleArn:executionRoleArn,networkMode:networkMode,requiresCompatibilities:requiresCompatibilities,cpu:cpu,memory:memory}" \
             --output json \
             --region "${{ vars.TF_REGION_NAME }}" | \
           aws ecs register-task-definition \
