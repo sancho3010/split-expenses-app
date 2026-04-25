@@ -1,4 +1,4 @@
-# Outputs for Frontend.
+# Outputs for Frontend in AWS
 
 output "ecs_service_name" {
   description = "Nombre del ECS Service del frontend"

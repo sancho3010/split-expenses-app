@@ -1,4 +1,4 @@
-# Outputs for Database.
+# Outputs for Database in AWS
 
 output "db_endpoint" {
   description = "Endpoint del RDS — usado como DATABASE_URL en el backend"
