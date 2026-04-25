@@ -21,6 +21,7 @@ WAIT_TIMEOUT = 10
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def browser():
     """Configura Chrome headless para los tests."""
@@ -55,16 +56,23 @@ def crear_grupo(driver, nombre, miembros):
     for miembro in miembros:
         driver.find_element(By.ID, "group-members").send_keys(miembro)
         driver.find_element(By.ID, "add-member-btn").click()
-        wait_for(driver, By.XPATH, f"//span[contains(@class,'member-tag') and contains(text(),'{miembro}')]")
+        wait_for(
+            driver,
+            By.XPATH,
+            f"//span[contains(@class,'member-tag') and contains(text(),'{miembro}')]",
+        )
 
     # Enviar formulario
-    driver.find_element(By.CSS_SELECTOR, "#create-group-form button[type='submit']").click()
+    driver.find_element(
+        By.CSS_SELECTOR, "#create-group-form button[type='submit']"
+    ).click()
     wait_for(driver, By.ID, "group-title")
 
 
 # ---------------------------------------------------------------------------
 # Flujo 1: Crear grupo y ver miembros
 # ---------------------------------------------------------------------------
+
 
 def test_crear_grupo_aparece_en_listado(browser):
     """Crear un grupo → aparece en la lista de grupos."""
@@ -106,6 +114,7 @@ def test_detalle_grupo_muestra_miembros(browser):
 # Flujo 2: Registrar gasto y ver en listado
 # ---------------------------------------------------------------------------
 
+
 def test_agregar_gasto_aparece_en_listado(browser):
     """Crear grupo → agregar gasto → aparece en la lista de gastos."""
     crear_grupo(browser, "Viaje Gasto", ["Ana", "Bob"])
@@ -117,7 +126,9 @@ def test_agregar_gasto_aparece_en_listado(browser):
     # Seleccionar pagador
     Select(browser.find_element(By.ID, "expense-paid-by")).select_by_index(1)
 
-    browser.find_element(By.CSS_SELECTOR, "#add-expense-form button[type='submit']").click()
+    browser.find_element(
+        By.CSS_SELECTOR, "#add-expense-form button[type='submit']"
+    ).click()
 
     # Verificar que el gasto aparece
     expenses_table = wait_for(browser, By.ID, "expenses-table")
@@ -139,7 +150,9 @@ def test_balance_refleja_gasto(browser):
 
     Select(browser.find_element(By.ID, "expense-paid-by")).select_by_index(1)
 
-    browser.find_element(By.CSS_SELECTOR, "#add-expense-form button[type='submit']").click()
+    browser.find_element(
+        By.CSS_SELECTOR, "#add-expense-form button[type='submit']"
+    ).click()
 
     # Ir a tab de balances
     wait_for(browser, By.CSS_SELECTOR, "[data-tab='balances']")
@@ -153,6 +166,7 @@ def test_balance_refleja_gasto(browser):
 # Flujo 4: Ver transferencias sugeridas
 # ---------------------------------------------------------------------------
 
+
 def test_transferencias_aparecen_despues_de_gasto(browser):
     """Crear grupo → agregar gasto → aparece transferencia sugerida."""
     crear_grupo(browser, "Viaje Transferencia", ["Ana", "Bob"])
@@ -163,7 +177,9 @@ def test_transferencias_aparecen_despues_de_gasto(browser):
 
     Select(browser.find_element(By.ID, "expense-paid-by")).select_by_index(1)
 
-    browser.find_element(By.CSS_SELECTOR, "#add-expense-form button[type='submit']").click()
+    browser.find_element(
+        By.CSS_SELECTOR, "#add-expense-form button[type='submit']"
+    ).click()
 
     # Ir a tab de transferencias
     wait_for(browser, By.CSS_SELECTOR, "[data-tab='settlements']")

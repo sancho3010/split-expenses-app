@@ -1,5 +1,8 @@
 FROM nginx:1.27-alpine
 
+# Actualizar paquetes del sistema para corregir CVEs (openssl, libxml2, libpng, musl, zlib)
+RUN apk update && apk upgrade --no-cache
+
 # Reemplazar la config principal de nginx completa
 COPY nginx.conf /etc/nginx/nginx.conf
 

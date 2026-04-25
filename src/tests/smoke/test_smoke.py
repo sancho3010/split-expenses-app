@@ -17,6 +17,7 @@ BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 # Backend: Health y conectividad
 # ---------------------------------------------------------------------------
 
+
 def test_health_check_retorna_200():
     """GET /health → 200 con status ok y database healthy."""
     response = httpx.get(f"{BASE_URL}/health", timeout=10)
@@ -38,6 +39,7 @@ def test_api_grupos_retorna_200():
 # ---------------------------------------------------------------------------
 # Frontend: Servicio y contenido
 # ---------------------------------------------------------------------------
+
 
 def test_frontend_retorna_200():
     """GET / → 200 (nginx está sirviendo el frontend)."""

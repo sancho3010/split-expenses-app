@@ -56,9 +56,8 @@ docker compose up --build
 .
 ├── .github/
 │   └── workflows/
-│       ├── ci-backend.yml      # CI del backend
-│       ├── ci-frontend.yml     # CI del frontend
-│       ├── ci-database.yml     # CI de migraciones
+│       ├── panic.yml           # panic button
+│       ├── ci.yml              # CI
 │       └── cd.yml              # CD a staging y producción
 ├── src/
 │   ├── docker-compose.yml

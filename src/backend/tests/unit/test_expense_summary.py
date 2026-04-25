@@ -90,7 +90,7 @@ def test_eliminar_gasto_existente_retorna_true():
     db = make_db_mock()
     gasto = make_expense_mock("Hotel", Decimal("90.00"))
 
-    (db.query.return_value.filter.return_value.first.return_value) = gasto
+    db.query.return_value.filter.return_value.first.return_value = gasto
 
     resultado = delete_expense(db, uuid4(), uuid4())
 
@@ -103,7 +103,7 @@ def test_eliminar_gasto_inexistente_retorna_false():
     """Si el gasto no existe, debe retornar False sin tocar la BD."""
     db = make_db_mock()
 
-    (db.query.return_value.filter.return_value.first.return_value) = None
+    db.query.return_value.filter.return_value.first.return_value = None
 
     resultado = delete_expense(db, uuid4(), uuid4())
 
@@ -116,7 +116,7 @@ def test_eliminar_gasto_no_llama_commit_si_no_existe():
     """Si el gasto no existe, no debe hacer commit."""
     db = make_db_mock()
 
-    (db.query.return_value.filter.return_value.first.return_value) = None
+    db.query.return_value.filter.return_value.first.return_value = None
 
     delete_expense(db, uuid4(), uuid4())
 
