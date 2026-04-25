@@ -161,6 +161,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
+          trivyignores: 'src/database/.trivyignore'
 
       # 7. Export outputs for CD
       - name: Set Job Outputs

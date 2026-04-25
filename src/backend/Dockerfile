@@ -2,8 +2,9 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# postgresql-client para pg_isready (usado en desarrollo local)
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client \
+# Actualizar paquetes del sistema y instalar postgresql-client
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
