@@ -1,4 +1,4 @@
-# Infra: Main Definition for Backend (AWS cloud deployment).
+# Infra: Main Definition for Backend (AWS Cloud).
 
 terraform {
   required_version = ">= 1.6.0"
@@ -119,12 +119,12 @@ resource "aws_ecs_task_definition" "app" {
   task_role_arn            = var.lab_role_arn
   execution_role_arn       = var.lab_role_arn
   #checkov:skip=CKV_AWS_249:AWS Academy solo provee un LabRole, no es posible separar task y execution roles
+  #checkov:skip=CKV_AWS_336:Python/Alembic/Uvicorn requieren escribir archivos temporales, no compatible con readonlyRootFilesystem
 
   container_definitions = jsonencode([
     {
       name      = "${local.prefix}-${local.component}-container"
       image     = var.docker_image_uri
-      readonlyRootFilesystem = true # CKV_AWS_336: filesystem de solo lectura
 
       portMappings = [
         {
