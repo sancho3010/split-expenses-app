@@ -137,12 +137,12 @@ resource "aws_ecs_task_definition" "app" {
   task_role_arn            = var.lab_role_arn
   execution_role_arn       = var.lab_role_arn
   #checkov:skip=CKV_AWS_249:AWS Academy solo provee un LabRole, no es posible separar task y execution roles (NO TENEMOS PERMISOS)
+  #checkov:skip=CKV_AWS_336:Nginx requiere escribir en /var/cache/nginx y /var/run, no compatible con readonlyRootFilesystem
 
   container_definitions = jsonencode([
     {
       name      = "${local.prefix}-${local.component}-container"
       image     = var.docker_image_uri
-      readonlyRootFilesystem = true # CKV_AWS_336: filesystem de solo lectura
 
       portMappings = [
         {

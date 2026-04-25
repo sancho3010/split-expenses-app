@@ -15,4 +15,3 @@ infra/
 tests/
 sonar-project.properties
 pyproject.toml
-alembic.ini

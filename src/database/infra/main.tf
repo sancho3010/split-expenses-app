@@ -1,4 +1,4 @@
-# Infra: Main Definition for Database (AWS Cloud Deployment).
+# Infra: Main Definition for Database (AWS Cloud).
 
 terraform {
   required_version = ">= 1.6.0"
