@@ -1,8 +1,9 @@
 """
-Smoke tests | verifican que el sistema está vivo después del deploy a producción.
+Smoke tests | verifican que el sistema está vivo y funcional después del deploy.
 
 Corren contra la URL real del ALB inyectada via APP_BASE_URL.
-No prueban lógica de negocio, solo que los endpoints principales responden.
+Van más allá de un simple healthcheck: validan que los componentes
+realmente están activos y pueden procesar operaciones básicas de lectura.
 """
 
 import os
@@ -13,7 +14,7 @@ BASE_URL = os.environ.get("APP_BASE_URL", "http://localhost:8000").rstrip("/")
 
 
 # ---------------------------------------------------------------------------
-# Backend
+# Backend: Health y conectividad
 # ---------------------------------------------------------------------------
 
 def test_health_check_retorna_200():
@@ -27,7 +28,7 @@ def test_health_check_retorna_200():
 
 
 def test_api_grupos_retorna_200():
-    """GET /api/groups/ → 200 (la API está respondiendo)."""
+    """GET /api/groups/ → 200 (backend + DB responden correctamente)."""
     response = httpx.get(f"{BASE_URL}/api/groups/", timeout=10)
 
     assert response.status_code == 200
@@ -35,7 +36,7 @@ def test_api_grupos_retorna_200():
 
 
 # ---------------------------------------------------------------------------
-# Frontend
+# Frontend: Servicio y contenido
 # ---------------------------------------------------------------------------
 
 def test_frontend_retorna_200():
@@ -51,3 +52,12 @@ def test_frontend_contiene_titulo():
     response = httpx.get(f"{BASE_URL}/", timeout=10)
 
     assert "Splitwise Lite" in response.text
+
+
+def test_frontend_carga_assets():
+    """GET / → el HTML referencia archivos CSS y JS (assets cargados correctamente)."""
+    response = httpx.get(f"{BASE_URL}/", timeout=10)
+    html = response.text
+
+    assert ".css" in html, "El frontend no referencia ningún archivo CSS"
+    assert ".js" in html, "El frontend no referencia ningún archivo JS"

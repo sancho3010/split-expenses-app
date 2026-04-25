@@ -1,3 +1,4 @@
+# Variables for Frontend
 
 variable "environment_name" {
   description = "Nombre del entorno (ej: staging, production). Usado para nombrar recursos."

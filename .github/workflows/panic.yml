@@ -1,17 +1,17 @@
-name: Panic Button | Stop Services
+name: Panic Button Service
 
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Entorno a detener'
+        description: 'Entorno a hacer rollback'
         required: true
         type: choice
         options:
           - staging
           - production
       component:
-        description: 'Componente a detener'
+        description: 'Componente a hacer rollback'
         required: true
         type: choice
         options:
@@ -24,7 +24,7 @@ on:
         required: true
 
 jobs:
-  panic:
+  rollback:
     runs-on: ubuntu-latest
     if: github.event.inputs.confirm == 'CONFIRMAR'
 
@@ -37,29 +37,89 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ vars.TF_REGION_NAME }}
 
-      - name: Stop backend service
+      - name: Rollback backend service
         if: github.event.inputs.component == 'backend' || github.event.inputs.component == 'ambos'
         run: |
-          echo "Stopping backend in ${{ github.event.inputs.environment }}..."
-          aws ecs update-service \
-            --cluster "splitwise-lite-${{ github.event.inputs.environment }}-ecs-cluster" \
-            --service "splitwise-lite-${{ github.event.inputs.environment }}-backend-service" \
-            --desired-count 0 \
-            --region "${{ vars.TF_REGION_NAME }}"
-          echo "Backend stopped."
+          CLUSTER="splitwise-lite-${{ github.event.inputs.environment }}-ecs-cluster"
+          SERVICE="splitwise-lite-${{ github.event.inputs.environment }}-backend-service"
 
-      - name: Stop frontend service
+          echo "Fetching current task definition for backend in ${{ github.event.inputs.environment }}..."
+          CURRENT_TD=$(aws ecs describe-services \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --query "services[0].taskDefinition" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+
+          TD_FAMILY=$(echo "$CURRENT_TD" | awk -F'/' '{print $NF}' | awk -F':' '{print $1}')
+          CURRENT_REV=$(echo "$CURRENT_TD" | awk -F':' '{print $NF}')
+          PREVIOUS_REV=$((CURRENT_REV - 1))
+
+          if [ "$PREVIOUS_REV" -lt 1 ]; then
+            echo "ERROR: No previous revision available for rollback."
+            exit 1
+          fi
+
+          PREVIOUS_TD="${TD_FAMILY}:${PREVIOUS_REV}"
+          echo "Rolling back backend from revision $CURRENT_REV to $PREVIOUS_REV ($PREVIOUS_TD)..."
+
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --task-definition "$PREVIOUS_TD" \
+            --force-new-deployment \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "Waiting for rollback to stabilize..."
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "Backend rollback complete in ${{ github.event.inputs.environment }}."
+
+      - name: Rollback frontend service
         if: github.event.inputs.component == 'frontend' || github.event.inputs.component == 'ambos'
         run: |
-          echo "Stopping frontend in ${{ github.event.inputs.environment }}..."
-          aws ecs update-service \
-            --cluster "splitwise-lite-${{ github.event.inputs.environment }}-ecs-cluster" \
-            --service "splitwise-lite-${{ github.event.inputs.environment }}-frontend-service" \
-            --desired-count 0 \
-            --region "${{ vars.TF_REGION_NAME }}"
-          echo "Frontend stopped."
+          CLUSTER="splitwise-lite-${{ github.event.inputs.environment }}-ecs-cluster"
+          SERVICE="splitwise-lite-${{ github.event.inputs.environment }}-frontend-service"
 
-      - name: Confirm services stopped
+          echo "Fetching current task definition for frontend in ${{ github.event.inputs.environment }}..."
+          CURRENT_TD=$(aws ecs describe-services \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --query "services[0].taskDefinition" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+
+          TD_FAMILY=$(echo "$CURRENT_TD" | awk -F'/' '{print $NF}' | awk -F':' '{print $1}')
+          CURRENT_REV=$(echo "$CURRENT_TD" | awk -F':' '{print $NF}')
+          PREVIOUS_REV=$((CURRENT_REV - 1))
+
+          if [ "$PREVIOUS_REV" -lt 1 ]; then
+            echo "ERROR: No previous revision available for rollback."
+            exit 1
+          fi
+
+          PREVIOUS_TD="${TD_FAMILY}:${PREVIOUS_REV}"
+          echo "Rolling back frontend from revision $CURRENT_REV to $PREVIOUS_REV ($PREVIOUS_TD)..."
+
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --task-definition "$PREVIOUS_TD" \
+            --force-new-deployment \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "Waiting for rollback to stabilize..."
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "Frontend rollback complete in ${{ github.event.inputs.environment }}."
+
+      - name: Confirm rollback
         run: |
-          echo "Services stopped in ${{ github.event.inputs.environment }} (${{ github.event.inputs.component }})."
-          echo "To restore, re-run the CD pipeline or manually set desired-count back to 1."
+          echo "Rollback completed in ${{ github.event.inputs.environment }} (${{ github.event.inputs.component }})."
+          echo "Services reverted to previous task definition revision."

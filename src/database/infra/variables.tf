@@ -1,5 +1,5 @@
+# Variables for Database.
 
-# infra rebuild trigger v2
 variable "environment_name" {
   description = "Nombre del entorno (ej: staging, production). Usado para nombrar recursos."
   type        = string
@@ -45,4 +45,10 @@ variable "db_password" {
 variable "backend_ecs_sg_id" {
   description = "ID del Security Group del ECS backend, para restringir acceso al RDS."
   type        = string
+}
+
+variable "deletion_protection" {
+  description = "Protección contra borrado accidental del RDS. Desactivar antes de terraform destroy."
+  type        = bool
+  default     = true
 }

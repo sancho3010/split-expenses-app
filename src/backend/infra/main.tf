@@ -1,4 +1,4 @@
-# Infra: Main Definition for Backend (AWS cloud deployment)
+# Infra: Main Definition for Backend (AWS cloud deployment).
 
 terraform {
   required_version = ">= 1.6.0"
@@ -54,8 +54,9 @@ data "aws_security_group" "alb_sg" {
 # -------------------- Grupo de Logs para ECS -----------------------
 resource "aws_cloudwatch_log_group" "ecs_logs" {
   name              = "/ecs/${local.prefix}-${local.component}-task"
-  retention_in_days = 14
-  tags              = local.common_tags
+  retention_in_days = 365 # CKV_AWS_338: retención mínima de 1 año
+  #checkov:skip=CKV_AWS_158:Encriptación KMS requiere CMK dedicada, fuera del alcance académico
+  tags = local.common_tags
 }
 
 # -------------------- Security Group del ECS -----------------------
@@ -68,6 +69,7 @@ data "aws_security_group" "ecs_sg" {
 
 # -------------------- Target Group ---------------------------------
 resource "aws_lb_target_group" "ecs_tg" {
+  #checkov:skip=CKV_AWS_378:HTTPS interno requiere certificado ACM, fuera del alcance académico
   name        = "${local.prefix}-be-tg"
   port        = 8000
   protocol    = "HTTP"
@@ -116,11 +118,13 @@ resource "aws_ecs_task_definition" "app" {
   memory                   = "512"
   task_role_arn            = var.lab_role_arn
   execution_role_arn       = var.lab_role_arn
+  #checkov:skip=CKV_AWS_249:AWS Academy solo provee un LabRole, no es posible separar task y execution roles
 
   container_definitions = jsonencode([
     {
-      name  = "${local.prefix}-${local.component}-container"
-      image = var.docker_image_uri
+      name      = "${local.prefix}-${local.component}-container"
+      image     = var.docker_image_uri
+      readonlyRootFilesystem = true # CKV_AWS_336: filesystem de solo lectura
 
       portMappings = [
         {
@@ -164,6 +168,7 @@ resource "aws_ecs_task_definition" "app" {
 
 # -------------------- ECS Service ----------------------------------
 resource "aws_ecs_service" "main" {
+  #checkov:skip=CKV_AWS_333:IP pública requerida en subnets públicas de AWS Academy (no hay NAT Gateway)
   name            = "${local.prefix}-${local.component}-service"
   cluster         = data.aws_ecs_cluster.main.arn
   task_definition = aws_ecs_task_definition.app.arn
