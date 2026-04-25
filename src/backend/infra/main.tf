@@ -1,4 +1,4 @@
-# Infra: Main Definition for Backend in AWS (Cloud).
+# Infra: Main Definition for Backend (AWS cloud deployment)
 
 terraform {
   required_version = ">= 1.6.0"
