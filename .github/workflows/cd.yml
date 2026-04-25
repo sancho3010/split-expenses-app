@@ -672,7 +672,7 @@ jobs:
         with:
           target: ${{ needs.deploy-base-tf-staging.outputs.alb_url_staging }}
           allow_issue_writing: false
-          cmd_options: '-I -r security_report.html'
+          cmd_options: '-I'
           artifact_name: ''
 
       # 3. Upload ZAP report as artifact
@@ -681,14 +681,14 @@ jobs:
         if: always()
         with:
           name: zap-security-report
-          path: security_report.html
+          path: report_html.html
 
       # 4. Fail if ZAP found actual vulnerabilities (FAIL-NEW > 0)
       - name: Check ZAP results
         if: always()
         run: |
-          if [ -f security_report.html ]; then
-            FAILS=$(grep -o 'FAIL-NEW: [0-9]*' security_report.html | grep -o '[0-9]*' || echo "0")
+          if [ -f report_html.html ]; then
+            FAILS=$(grep -o 'FAIL-NEW: [0-9]*' report_html.html | grep -o '[0-9]*' || echo "0")
 
             if [ "$FAILS" -gt 0 ]; then
               echo "ZAP found $FAILS new vulnerabilities. Failing pipeline."
@@ -1308,8 +1308,11 @@ jobs:
           aws-region: ${{ vars.TF_REGION_NAME }}
 
       - name: Rollback backend to previous task definition
+        env:
+          CLUSTER: ${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }}
+          ALB_URL: ${{ needs.deploy-base-tf-prod.outputs.alb_url_prod }}
+          MAX_ATTEMPTS: "3"
         run: |
-          CLUSTER="${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }}"
           SERVICE="splitwise-lite-production-backend-service"
           FAMILY="splitwise-lite-production-backend-task"
 
@@ -1325,62 +1328,91 @@ jobs:
           CURRENT_REV=$(echo "$CURRENT_TD_ARN" | awk -F':' '{print $NF}')
           echo "Current revision: $CURRENT_REV"
 
-          # 2. Buscar la revisión anterior (Terraform desactiva las anteriores)
-          echo "Searching for previous revision..."
-          PREVIOUS_TD_ARN=$(aws ecs list-task-definitions \
+          # 2. Obtener las últimas N revisiones inactivas
+          echo "Fetching last $MAX_ATTEMPTS inactive revisions..."
+          INACTIVE_TDS=$(aws ecs list-task-definitions \
             --family-prefix "$FAMILY" \
             --status INACTIVE \
             --sort DESC \
-            --query "taskDefinitionArns[0]" \
+            --query "taskDefinitionArns[:${MAX_ATTEMPTS}]" \
             --output text \
             --region "${{ vars.TF_REGION_NAME }}")
 
-          if [ "$PREVIOUS_TD_ARN" = "None" ] || [ -z "$PREVIOUS_TD_ARN" ]; then
-            echo "ERROR: No previous revision found for rollback."
+          if [ -z "$INACTIVE_TDS" ] || [ "$INACTIVE_TDS" = "None" ]; then
+            echo "ERROR: No inactive revisions found for rollback."
             exit 1
           fi
 
-          PREVIOUS_REV=$(echo "$PREVIOUS_TD_ARN" | awk -F':' '{print $NF}')
-          echo "Previous revision found: $PREVIOUS_REV (inactive)"
+          # 3. Intentar rollback con cada revisión hasta encontrar una que funcione
+          ROLLBACK_SUCCESS=false
+          ATTEMPT=0
 
-          # 3. Re-registrar la config anterior como nueva revisión ACTIVE
-          echo "Re-registering previous config as new ACTIVE revision..."
-          aws ecs describe-task-definition \
-            --task-definition "$PREVIOUS_TD_ARN" \
-            --query "taskDefinition.{family:family,containerDefinitions:containerDefinitions,taskRoleArn:taskRoleArn,executionRoleArn:executionRoleArn,networkMode:networkMode,requiresCompatibilities:requiresCompatibilities,cpu:cpu,memory:memory}" \
-            --output json \
-            --region "${{ vars.TF_REGION_NAME }}" > /tmp/td_rollback_backend.json
+          for PREVIOUS_TD_ARN in $INACTIVE_TDS; do
+            ATTEMPT=$((ATTEMPT + 1))
+            PREVIOUS_REV=$(echo "$PREVIOUS_TD_ARN" | awk -F':' '{print $NF}')
+            echo ""
+            echo "=== Attempt $ATTEMPT/$MAX_ATTEMPTS: trying revision $PREVIOUS_REV ==="
 
-          NEW_TD_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file:///tmp/td_rollback_backend.json \
-            --query "taskDefinition.taskDefinitionArn" \
-            --output text \
-            --region "${{ vars.TF_REGION_NAME }}")
+            # Re-registrar como nueva revisión ACTIVE
+            echo "Re-registering config from rev $PREVIOUS_REV..."
+            aws ecs describe-task-definition \
+              --task-definition "$PREVIOUS_TD_ARN" \
+              --query "taskDefinition.{family:family,containerDefinitions:containerDefinitions,taskRoleArn:taskRoleArn,executionRoleArn:executionRoleArn,networkMode:networkMode,requiresCompatibilities:requiresCompatibilities,cpu:cpu,memory:memory}" \
+              --output json \
+              --region "${{ vars.TF_REGION_NAME }}" > /tmp/td_rollback.json
 
-          NEW_REV=$(echo "$NEW_TD_ARN" | awk -F':' '{print $NF}')
-          echo "New ACTIVE revision: $NEW_REV (config from rev $PREVIOUS_REV)"
+            NEW_TD_ARN=$(aws ecs register-task-definition \
+              --cli-input-json file:///tmp/td_rollback.json \
+              --query "taskDefinition.taskDefinitionArn" \
+              --output text \
+              --region "${{ vars.TF_REGION_NAME }}")
 
-          # 4. Actualizar el servicio con la nueva revisión
-          echo "Updating service..."
-          aws ecs update-service \
-            --cluster "$CLUSTER" \
-            --service "$SERVICE" \
-            --task-definition "$NEW_TD_ARN" \
-            --force-new-deployment \
-            --region "${{ vars.TF_REGION_NAME }}"
+            NEW_REV=$(echo "$NEW_TD_ARN" | awk -F':' '{print $NF}')
+            echo "New ACTIVE revision: $NEW_REV (config from rev $PREVIOUS_REV)"
 
-          # 5. Esperar a que el rollback se estabilice
-          echo "Waiting for backend rollback to stabilize..."
-          aws ecs wait services-stable \
-            --cluster "$CLUSTER" \
-            --services "$SERVICE" \
-            --region "${{ vars.TF_REGION_NAME }}"
+            # Desplegar
+            echo "Updating service..."
+            aws ecs update-service \
+              --cluster "$CLUSTER" \
+              --service "$SERVICE" \
+              --task-definition "$NEW_TD_ARN" \
+              --force-new-deployment \
+              --region "${{ vars.TF_REGION_NAME }}" > /dev/null
 
-          echo "Backend rollback complete (rev $CURRENT_REV → $NEW_REV, config from rev $PREVIOUS_REV)."
+            # Esperar estabilización
+            echo "Waiting for deployment to stabilize..."
+            if aws ecs wait services-stable \
+              --cluster "$CLUSTER" \
+              --services "$SERVICE" \
+              --region "${{ vars.TF_REGION_NAME }}" 2>/dev/null; then
+
+              # Healthcheck
+              echo "Running healthcheck..."
+              sleep 10
+              if curl -sf --max-time 10 "${ALB_URL}/health" > /dev/null 2>&1; then
+                echo "Healthcheck PASSED. Rollback successful!"
+                echo "Backend rollback complete (rev $CURRENT_REV → $NEW_REV, config from rev $PREVIOUS_REV)."
+                ROLLBACK_SUCCESS=true
+                break
+              else
+                echo "Healthcheck FAILED. Trying next revision..."
+              fi
+            else
+              echo "Service did not stabilize. Trying next revision..."
+            fi
+          done
+
+          if [ "$ROLLBACK_SUCCESS" = false ]; then
+            echo "ERROR: All $MAX_ATTEMPTS rollback attempts failed. Manual intervention required."
+            exit 1
+          fi
 
       - name: Rollback frontend to previous task definition
+        env:
+          CLUSTER: ${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }}
+          ALB_URL: ${{ needs.deploy-base-tf-prod.outputs.alb_url_prod }}
+          MAX_ATTEMPTS: "3"
         run: |
-          CLUSTER="${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }}"
           SERVICE="splitwise-lite-production-frontend-service"
           FAMILY="splitwise-lite-production-frontend-task"
 
@@ -1396,55 +1428,81 @@ jobs:
           CURRENT_REV=$(echo "$CURRENT_TD_ARN" | awk -F':' '{print $NF}')
           echo "Current revision: $CURRENT_REV"
 
-          # 2. Buscar la revisión anterior
-          echo "Searching for previous revision..."
-          PREVIOUS_TD_ARN=$(aws ecs list-task-definitions \
+          # 2. Obtener las últimas N revisiones inactivas
+          echo "Fetching last $MAX_ATTEMPTS inactive revisions..."
+          INACTIVE_TDS=$(aws ecs list-task-definitions \
             --family-prefix "$FAMILY" \
             --status INACTIVE \
             --sort DESC \
-            --query "taskDefinitionArns[0]" \
+            --query "taskDefinitionArns[:${MAX_ATTEMPTS}]" \
             --output text \
             --region "${{ vars.TF_REGION_NAME }}")
 
-          if [ "$PREVIOUS_TD_ARN" = "None" ] || [ -z "$PREVIOUS_TD_ARN" ]; then
-            echo "ERROR: No previous revision found for rollback."
+          if [ -z "$INACTIVE_TDS" ] || [ "$INACTIVE_TDS" = "None" ]; then
+            echo "ERROR: No inactive revisions found for rollback."
             exit 1
           fi
 
-          PREVIOUS_REV=$(echo "$PREVIOUS_TD_ARN" | awk -F':' '{print $NF}')
-          echo "Previous revision found: $PREVIOUS_REV (inactive)"
+          # 3. Intentar rollback con cada revisión hasta encontrar una que funcione
+          ROLLBACK_SUCCESS=false
+          ATTEMPT=0
 
-          # 3. Re-registrar como nueva revisión ACTIVE
-          echo "Re-registering previous config as new ACTIVE revision..."
-          aws ecs describe-task-definition \
-            --task-definition "$PREVIOUS_TD_ARN" \
-            --query "taskDefinition.{family:family,containerDefinitions:containerDefinitions,taskRoleArn:taskRoleArn,executionRoleArn:executionRoleArn,networkMode:networkMode,requiresCompatibilities:requiresCompatibilities,cpu:cpu,memory:memory}" \
-            --output json \
-            --region "${{ vars.TF_REGION_NAME }}" > /tmp/td_rollback_frontend.json
+          for PREVIOUS_TD_ARN in $INACTIVE_TDS; do
+            ATTEMPT=$((ATTEMPT + 1))
+            PREVIOUS_REV=$(echo "$PREVIOUS_TD_ARN" | awk -F':' '{print $NF}')
+            echo ""
+            echo "=== Attempt $ATTEMPT/$MAX_ATTEMPTS: trying revision $PREVIOUS_REV ==="
 
-          NEW_TD_ARN=$(aws ecs register-task-definition \
-            --cli-input-json file:///tmp/td_rollback_frontend.json \
-            --query "taskDefinition.taskDefinitionArn" \
-            --output text \
-            --region "${{ vars.TF_REGION_NAME }}")
+            # Re-registrar como nueva revisión ACTIVE
+            echo "Re-registering config from rev $PREVIOUS_REV..."
+            aws ecs describe-task-definition \
+              --task-definition "$PREVIOUS_TD_ARN" \
+              --query "taskDefinition.{family:family,containerDefinitions:containerDefinitions,taskRoleArn:taskRoleArn,executionRoleArn:executionRoleArn,networkMode:networkMode,requiresCompatibilities:requiresCompatibilities,cpu:cpu,memory:memory}" \
+              --output json \
+              --region "${{ vars.TF_REGION_NAME }}" > /tmp/td_rollback.json
 
-          NEW_REV=$(echo "$NEW_TD_ARN" | awk -F':' '{print $NF}')
-          echo "New ACTIVE revision: $NEW_REV (config from rev $PREVIOUS_REV)"
+            NEW_TD_ARN=$(aws ecs register-task-definition \
+              --cli-input-json file:///tmp/td_rollback.json \
+              --query "taskDefinition.taskDefinitionArn" \
+              --output text \
+              --region "${{ vars.TF_REGION_NAME }}")
 
-          # 4. Actualizar el servicio
-          echo "Updating service..."
-          aws ecs update-service \
-            --cluster "$CLUSTER" \
-            --service "$SERVICE" \
-            --task-definition "$NEW_TD_ARN" \
-            --force-new-deployment \
-            --region "${{ vars.TF_REGION_NAME }}"
+            NEW_REV=$(echo "$NEW_TD_ARN" | awk -F':' '{print $NF}')
+            echo "New ACTIVE revision: $NEW_REV (config from rev $PREVIOUS_REV)"
 
-          # 5. Esperar estabilización
-          echo "Waiting for frontend rollback to stabilize..."
-          aws ecs wait services-stable \
-            --cluster "$CLUSTER" \
-            --services "$SERVICE" \
-            --region "${{ vars.TF_REGION_NAME }}"
+            # Desplegar
+            echo "Updating service..."
+            aws ecs update-service \
+              --cluster "$CLUSTER" \
+              --service "$SERVICE" \
+              --task-definition "$NEW_TD_ARN" \
+              --force-new-deployment \
+              --region "${{ vars.TF_REGION_NAME }}" > /dev/null
 
-          echo "Frontend rollback complete (rev $CURRENT_REV → $NEW_REV, config from rev $PREVIOUS_REV)."
+            # Esperar estabilización
+            echo "Waiting for deployment to stabilize..."
+            if aws ecs wait services-stable \
+              --cluster "$CLUSTER" \
+              --services "$SERVICE" \
+              --region "${{ vars.TF_REGION_NAME }}" 2>/dev/null; then
+
+              # Healthcheck
+              echo "Running healthcheck..."
+              sleep 10
+              if curl -sf --max-time 10 "${ALB_URL}/" > /dev/null 2>&1; then
+                echo "Healthcheck PASSED. Rollback successful!"
+                echo "Frontend rollback complete (rev $CURRENT_REV → $NEW_REV, config from rev $PREVIOUS_REV)."
+                ROLLBACK_SUCCESS=true
+                break
+              else
+                echo "Healthcheck FAILED. Trying next revision..."
+              fi
+            else
+              echo "Service did not stabilize. Trying next revision..."
+            fi
+          done
+
+          if [ "$ROLLBACK_SUCCESS" = false ]; then
+            echo "ERROR: All $MAX_ATTEMPTS rollback attempts failed. Manual intervention required."
+            exit 1
+          fi
