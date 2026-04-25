@@ -1057,10 +1057,6 @@ jobs:
           echo "ECS SERVICE ARN prod: $ECS_SERVICE_ARN"
           echo "ecs_service_arn=${ECS_SERVICE_ARN}" >> $GITHUB_OUTPUT
 
-
-  # ---------------------------------------------------------------
-  # Job de Actualización Servicio Backend Prod (Forzar despliegue)
-  # ---------------------------------------------------------------
   update-backend-prod:
     needs: [deploy-base-tf-prod, deploy-backend-tf-prod]
     runs-on: ubuntu-latest
@@ -1206,10 +1202,6 @@ jobs:
           echo "ECS SERVICE ARN prod: $ECS_SERVICE_ARN"
           echo "ecs_service_arn=${ECS_SERVICE_ARN}" >> $GITHUB_OUTPUT
 
-
-  # ---------------------------------------------------------------
-  # Job de Actualización Servicio Frontend Prod (Forzar despliegue)
-  # ---------------------------------------------------------------
   update-frontend-prod:
     needs: [deploy-base-tf-prod, deploy-frontend-tf-prod]
     runs-on: ubuntu-latest
@@ -1298,3 +1290,100 @@ jobs:
         env:
           APP_BASE_URL: ${{ needs.deploy-base-tf-prod.outputs.alb_url_prod }}
         run: pytest src/tests/smoke/test_smoke.py
+
+  rollback-prod:
+    runs-on: ubuntu-latest
+    needs: [deploy-base-tf-prod, smoke-test-prod]
+    if: |
+      always() &&
+      needs.smoke-test-prod.result == 'failure'
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.TF_REGION_NAME }}
+
+      - name: Rollback backend to previous task definition
+        run: |
+          CLUSTER="${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }}"
+          SERVICE="splitwise-lite-production-backend-service"
+
+          echo "Fetching current task definition for backend..."
+          CURRENT_TD=$(aws ecs describe-services \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --query "services[0].taskDefinition" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+
+          # Extraer familia y revisión actual
+          TD_FAMILY=$(echo "$CURRENT_TD" | awk -F'/' '{print $NF}' | awk -F':' '{print $1}')
+          CURRENT_REV=$(echo "$CURRENT_TD" | awk -F':' '{print $NF}')
+          PREVIOUS_REV=$((CURRENT_REV - 1))
+
+          if [ "$PREVIOUS_REV" -lt 1 ]; then
+            echo "ERROR: No previous revision available for rollback."
+            exit 1
+          fi
+
+          PREVIOUS_TD="${TD_FAMILY}:${PREVIOUS_REV}"
+          echo "Rolling back backend from revision $CURRENT_REV to $PREVIOUS_REV ($PREVIOUS_TD)..."
+
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --task-definition "$PREVIOUS_TD" \
+            --force-new-deployment \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "Waiting for backend rollback to stabilize..."
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "Backend rollback complete."
+
+      - name: Rollback frontend to previous task definition
+        run: |
+          CLUSTER="${{ needs.deploy-base-tf-prod.outputs.ecs_cluster_name_prod }}"
+          SERVICE="splitwise-lite-production-frontend-service"
+
+          echo "Fetching current task definition for frontend..."
+          CURRENT_TD=$(aws ecs describe-services \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --query "services[0].taskDefinition" \
+            --output text \
+            --region "${{ vars.TF_REGION_NAME }}")
+
+          TD_FAMILY=$(echo "$CURRENT_TD" | awk -F'/' '{print $NF}' | awk -F':' '{print $1}')
+          CURRENT_REV=$(echo "$CURRENT_TD" | awk -F':' '{print $NF}')
+          PREVIOUS_REV=$((CURRENT_REV - 1))
+
+          if [ "$PREVIOUS_REV" -lt 1 ]; then
+            echo "ERROR: No previous revision available for rollback."
+            exit 1
+          fi
+
+          PREVIOUS_TD="${TD_FAMILY}:${PREVIOUS_REV}"
+          echo "Rolling back frontend from revision $CURRENT_REV to $PREVIOUS_REV ($PREVIOUS_TD)..."
+
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --task-definition "$PREVIOUS_TD" \
+            --force-new-deployment \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "Waiting for frontend rollback to stabilize..."
+          aws ecs wait services-stable \
+            --cluster "$CLUSTER" \
+            --services "$SERVICE" \
+            --region "${{ vars.TF_REGION_NAME }}"
+
+          echo "Frontend rollback complete."

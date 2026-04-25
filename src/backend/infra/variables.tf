@@ -1,5 +1,5 @@
 
-# Infra: Variables Definition for Backend
+# Infra: Variables Definition for Backend.
 
 variable "environment_name" {
   description = "Nombre del entorno (ej: staging, production). Usado para nombrar recursos."

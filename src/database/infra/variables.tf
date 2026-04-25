@@ -1,5 +1,5 @@
+# Variables for Database.
 
-# infra rebuild trigger v2
 variable "environment_name" {
   description = "Nombre del entorno (ej: staging, production). Usado para nombrar recursos."
   type        = string
